@@ -223,6 +223,11 @@ async def setup_iommu_for_sv39_s1(dut, prog_master, ds_ram, *,
     dc = build_dc_sv39_s1(s1_root_ppn)
     dc_addr = (ddt_base_ppn << 12) + (did & 0x3F) * 64
     ds_ram.write(dc_addr, dc)
+
+    readback = bytes(ds_ram.read(dc_addr, 64))
+    assert readback == dc, f"DC writeback mismatch!\n  wrote: {dc.hex()}\n  read : {readback.hex()}"
+    log.info(f"  DC readback OK: fsc(offset24..31)={readback[24:32].hex()}")
+
     log.info(f"  DC for did={did}: ds_ram[0x{dc_addr:x}] "
              f"(fsc.mode=Sv39, fsc.ppn=0x{s1_root_ppn:x})")
 
@@ -343,49 +348,43 @@ def make_ds_ram(dut, size: int = 0x100000):
 # =============================================================================
 # Device Context (DC) ビルダ — Extended format (64 bytes)
 # =============================================================================
-def build_dc(*,
-    tc_bits: int = TC_V,
-    iohgatp_mode: int = 0,
-    iohgatp_gscid: int = 0,
-    iohgatp_ppn: int = 0,
-    pscid: int = 0,
-    fsc_mode: int = 0,
-    fsc_ppn: int = 0,
-    msiptp_mode: int = 0,
-    msiptp_ppn: int = 0,
-    msi_addr_mask: int = 0,
-    msi_addr_pattern: int = 0,
-) -> bytes:
-    """64-byte DC エントリ (Extended format) を構築。
-    bit position は RISC-V IOMMU spec section 2.1.4 に準拠。
+def build_dc(*, tc_bits=TC_V, iohgatp_mode=0, iohgatp_gscid=0, iohgatp_ppn=0,
+             ta_bits=0, fsc_mode=0, fsc_ppn=0,
+             msiptp_mode=0, msiptp_ppn=0,
+             msi_addr_mask=0, msi_addr_pattern=0):
+    """64-byte DC を生成 (riscv-iommu spec / extended format)。
+
+    各 satp-like field のビット配置は ALL "MODE は最上位 4 bit, PPN は下位":
+        fsc / iohgatp / msiptp:
+          [63:60] MODE
+          [59:44] reserved (iohgatp は [59:44] が GSCID)
+          [43: 0] PPN
     """
-    dc = bytearray(DC_SIZE)
+    tc       = tc_bits & 0xFFFFFFFFFFFFFFFF
 
-    # tc: 単純な bit OR
-    tc = tc_bits
+    # iohgatp: MODE [63:60] / GSCID [59:44] / PPN [43:0]
+    iohgatp  = ( (iohgatp_ppn   & 0x0FFF_FFFF_FFFF)        # [43:0]
+               | ((iohgatp_gscid & 0xFFFF) << 44)          # [59:44]
+               | ((iohgatp_mode  & 0xF)    << 60) )        # [63:60]
 
-    # iohgatp: [3:0]=mode, [15:4]=gscid, [59:16]=ppn
-    iohgatp = (iohgatp_mode & 0xF) | ((iohgatp_gscid & 0xFFF) << 4) | ((iohgatp_ppn & 0xFFFFFFFFFFF) << 16)
+    ta       = ta_bits & 0xFFFFFFFFFFFFFFFF
 
-    # ta: [31:12]=pscid (20 bits)
-    ta = (pscid & 0xFFFFF) << 12
+    # fsc: MODE [63:60] / reserved [59:44] / PPN [43:0]
+    fsc      = ( (fsc_ppn  & 0x0FFF_FFFF_FFFF)             # [43:0]
+               | ((fsc_mode & 0xF) << 60) )                # [63:60]
 
-    # fsc: [3:0]=mode, [43:4]=ppn (40 bits or 44 bits, spec dependent)
-    fsc = (fsc_mode & 0xF) | ((fsc_ppn & 0xFFFFFFFFFFF) << 4)
+    # msiptp: 同レイアウト
+    msiptp   = ( (msiptp_ppn  & 0x0FFF_FFFF_FFFF)
+               | ((msiptp_mode & 0xF) << 60) )
 
-    # msiptp: [3:0]=mode, [53:10]=ppn (44 bits at offset 10)
-    msiptp = (msiptp_mode & 0xF) | ((msiptp_ppn & 0xFFFFFFFFFFF) << 10)
-
-    dc[DC_OFF_TC:DC_OFF_TC+8]                           = tc.to_bytes(8, "little")
-    dc[DC_OFF_IOHGATP:DC_OFF_IOHGATP+8]                 = iohgatp.to_bytes(8, "little")
-    dc[DC_OFF_TA:DC_OFF_TA+8]                           = ta.to_bytes(8, "little")
-    dc[DC_OFF_FSC:DC_OFF_FSC+8]                         = fsc.to_bytes(8, "little")
-    dc[DC_OFF_MSIPTP:DC_OFF_MSIPTP+8]                   = msiptp.to_bytes(8, "little")
-    dc[DC_OFF_MSI_ADDR_MASK:DC_OFF_MSI_ADDR_MASK+8]     = msi_addr_mask.to_bytes(8, "little")
-    dc[DC_OFF_MSI_ADDR_PATTERN:DC_OFF_MSI_ADDR_PATTERN+8] = msi_addr_pattern.to_bytes(8, "little")
-    # reserved DW (offset 56) は CDW が読まないので 0 のまま
-
-    return bytes(dc)
+    return (tc.to_bytes(8, "little")
+          + iohgatp.to_bytes(8, "little")
+          + ta.to_bytes(8, "little")
+          + fsc.to_bytes(8, "little")
+          + msiptp.to_bytes(8, "little")
+          + msi_addr_mask.to_bytes(8, "little")
+          + msi_addr_pattern.to_bytes(8, "little")
+          + (0).to_bytes(8, "little"))   # 8 番目の DW (extended の 64 byte 化)
 
 
 def build_dc_identity() -> bytes:

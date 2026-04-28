@@ -551,34 +551,6 @@ module tb_riscv_iommu_wrapper
         .wsi_wires_o     ( wsi_wires_o         )
     );
 
-    // // =========================================================================
-    // // DEBUG: stream_arbiter の ar_ready 伝播問題を bypass
-    // // CDW が唯一の valid master のとき、ar_ready を直接 ds → CDW に
-    // // 通すように force する。本来は arbiter で自然に通るはずだが、
-    // // 統合テストで block されているので debug 用 workaround。
-    // //
-    // // 他 master (PTW 等) を使うときは外す or 条件追加すること。
-    // // =========================================================================
-    // initial begin
-    //     @(posedge rst_ni);            // reset 解除待ち
-    //     @(posedge clk_i);
-    //     forever begin
-    //         @(negedge clk_i);          // 信号値確定タイミング (clock の落ち際)
-    //         if (i_dut.i_rv_iommu_ds_if.cdw_req_i.ar_valid
-    //             && !i_dut.i_rv_iommu_ds_if.ptw_req_i.ar_valid
-    //             && !i_dut.i_rv_iommu_ds_if.cq_req_i.ar_valid
-    //             && !i_dut.i_rv_iommu_ds_if.msiptw_req_i.ar_valid
-    //             && !i_dut.i_rv_iommu_ds_if.mrif_handler_req_i.ar_valid)
-    //         begin
-    //             force i_dut.i_rv_iommu_ds_if.cdw_resp_o.ar_ready
-    //                 = i_dut.i_rv_iommu_ds_if.ds_resp_i.ar_ready;
-    //         end else begin
-    //             release i_dut.i_rv_iommu_ds_if.cdw_resp_o.ar_ready;
-    //         end
-    //     end
-    // end
-
-    // // =========================================================================
     initial begin
         $dumpfile("dump.vcd");
         $dumpvars(0, tb_riscv_iommu_wrapper);
