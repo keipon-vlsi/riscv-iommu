@@ -18,8 +18,9 @@
 //
 // Disclaimer:  This file was generated using LowRISC `reggen` tool. Edit at your own risk.
 
+import rv_iommu_field_pkg::*;
 module rv_iommu_field_arb
-    import rv_iommu_field_pkg::*;
+    // import rv_iommu_field_pkg::*;
     #(
         parameter int         DATA_WIDTH = 32,
         parameter sw_access_e SwAccess = SwAccessRW

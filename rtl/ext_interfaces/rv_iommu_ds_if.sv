@@ -75,7 +75,8 @@ module rv_iommu_ds_if #(
     //# AR Channel (PTW, CDW, CQ, MSIPTW, MRIF handler)
     stream_arbiter #(
         .DATA_T ( ar_chan_t ),
-        .N_INP  ( 5         )
+        .N_INP  ( 5         ),
+        .ARBITER( "prio" )
     ) i_stream_arbiter_ar (
         .clk_i          (clk_i),
         .rst_ni         (rst_ni),

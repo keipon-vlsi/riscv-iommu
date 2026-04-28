@@ -1,0 +1,14 @@
+{
+  "name": "IOMMU Verification Env",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "mshantz.language-verilog",
+        "ms-python.python"
+      ]
+    }
+  }
+}

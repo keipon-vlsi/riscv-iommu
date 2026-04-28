@@ -31,11 +31,11 @@ module rv_iommu_ptw_sv39x4_pc #(
     /// AXI Full response struct type
     parameter type  axi_rsp_t       = logic
 ) (
-    input  logic                    clk_i,                  // Clock
-    input  logic                    rst_ni,                 // Asynchronous reset active low
-    
+    input  logic                                clk_i,                  // Clock
+    input  logic                                rst_ni,                 // Asynchronous reset active low
+
     // Trigger PTW
-    input  logic                    init_ptw_i,
+    input  logic                                init_ptw_i,
 
     // Error signaling
     output logic                                ptw_active_o,           // Set when PTW is walking memory
@@ -44,54 +44,54 @@ module rv_iommu_ptw_sv39x4_pc #(
     output logic                                ptw_error_2S_int_o,     // set when an error occurred in stage 2 during stage 1 translation
     output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,
 
-    input  logic                    en_1S_i,        // Enable signal for first-stage translation. Defined by DC/PC
-    input  logic                    en_2S_i,        // Enable signal for second-stage translation. Defined by DC only
-    input  logic                    is_store_i,     // Indicate whether this translation was triggered by a store or a load
-    input  logic                    is_rx_i,        // Indicate whether the access is read-for-execute
+    input  logic                                en_1S_i,        // Enable signal for first-stage translation. Defined by DC/PC
+    input  logic                                en_2S_i,        // Enable signal for second-stage translation. Defined by DC only
+    input  logic                                is_store_i,     // Indicate whether this translation was triggered by a store or a load
+    // input  logic                                is_rx_i,        // Indicate whether the access is read-for-execute
 
-    input  axi_rsp_t    mem_resp_i,
-    output axi_req_t    mem_req_o,
+    input  axi_rsp_t                            mem_resp_i,
+    output axi_req_t                            mem_req_o,
 
     // to IOTLB, update logic
-    output logic                    update_o,
-    output logic                    up_1S_2M_o,
-    output logic                    up_1S_1G_o,
-    output logic                    up_2S_2M_o,
-    output logic                    up_2S_1G_o,
-    output logic [riscv::GPPNW-1:0] up_vpn_o,   // GPPN = 29
-    output logic [19:0]             up_pscid_o,
-    output logic [15:0]             up_gscid_o,
-    output riscv::pte_t             up_1S_content_o,
-    output riscv::pte_t             up_2S_content_o,
+    output logic                                update_o,
+    output logic                                up_1S_2M_o,
+    output logic                                up_1S_1G_o,
+    output logic                                up_2S_2M_o,
+    output logic                                up_2S_1G_o,
+    output logic [riscv::GPPNW-1:0]             up_vpn_o,   // GPPN = 29
+    output logic [19:0]                         up_pscid_o,
+    output logic [15:0]                         up_gscid_o,
+    output riscv::pte_t                         up_1S_content_o,
+    output riscv::pte_t                         up_2S_content_o,
 
     // IOTLB tags
-    input  logic [riscv::VLEN-1:0]  req_iova_i, // VLEN = 64
-    input  logic [19:0]             pscid_i,
-    input  logic [15:0]             gscid_i,
+    input  logic [riscv::VLEN-1:0]              req_iova_i, // VLEN = 64
+    input  logic [19:0]                         pscid_i,
+    input  logic [15:0]                         gscid_i,
 
     // MSI translation
-    input  logic                        msi_en_i,
-    input  logic [riscv::GPPNW-1:0]     msi_addr_mask_i,
-    input  logic [riscv::GPPNW-1:0]     msi_addr_pattern_i,
+    input  logic                                msi_en_i,
+    input  logic [riscv::GPPNW-1:0]             msi_addr_mask_i,
+    input  logic [riscv::GPPNW-1:0]             msi_addr_pattern_i,
 
     // Bus to send first-stage data to MSI PTW
-    output logic                        gpaddr_is_msi_o,
-    output logic [riscv::GPPNW-1:0]     msi_vpn_o,
-    output logic                        msi_1S_2M_o,
-    output logic                        msi_1S_1G_o,
-    output riscv::pte_t                 msi_gpte_o,
+    output logic                                gpaddr_is_msi_o,
+    output logic [riscv::GPPNW-1:0]             msi_vpn_o,
+    output logic                                msi_1S_2M_o,
+    output logic                                msi_1S_1G_o,
+    output riscv::pte_t                         msi_gpte_o,
 
     // CDW implicit translations (Second-stage only)
-    input  logic                        cdw_implicit_access_i,
-    input  logic [(riscv::GPPNW-1):0]   pdt_gppn_i, // GPPN of the DC.fsc or PDT entry
-    output logic                        cdw_done_o,
-    output logic                        flush_cdw_o,
+    input  logic                                cdw_implicit_access_i,
+    input  logic [(riscv::GPPNW-1):0]           pdt_gppn_i, // GPPN of the DC.fsc or PDT entry
+    output logic                                cdw_done_o,
+    output logic                                flush_cdw_o,
 
     // from DC/PC
-    input  logic [riscv::PPNW-1:0]  iosatp_ppn_i,  // ppn from iosatp, PPNW = 44 for sv39x4
-    input  logic [riscv::PPNW-1:0]  iohgatp_ppn_i, // ppn from iohgatp (may be forwarded by the CDW), PPNW = 44 for sv39x4
+    input  logic [riscv::PPNW-1:0]              iosatp_ppn_i,  // ppn from iosatp, PPNW = 44 for sv39x4
+    input  logic [riscv::PPNW-1:0]              iohgatp_ppn_i, // ppn from iohgatp (may be forwarded by the CDW), PPNW = 44 for sv39x4
 
-    output logic [riscv::GPLEN-1:0] bad_gpaddr_o    // to return the GPA in case of second-stage error
+    output logic [riscv::GPLEN-1:0]             bad_gpaddr_o    // to return the GPA in case of second-stage error
 );
 
     // PTW states
@@ -539,8 +539,8 @@ module rv_iommu_ptw_sv39x4_pc #(
                             endcase
 
                             //# Valid translation found (either 1G, 2M or 4K entry): Update IOTLB
-                            // IOTLB is updated only if PTE checks are passed, 
-                            // so that these checks do not need to be performed again on an IOTLB hit
+                            // Permission checks (A/D/R/U bits) are deferred to the IOTLB hit path.
+                            // Only structural validity is checked here.
 
                             // Do not update IOTLB for CDW implicit accesses
                             // When Stage 2 is disabled and the GPA (SPA) is an MSI address, IOTLB is not updated yet and
@@ -550,22 +550,26 @@ module rv_iommu_ptw_sv39x4_pc #(
                                     else                        cdw_done_o = 1'b1;
                             end
 
-                            // "(1): If i > 0 and pte.vpn[i − 1 : 0] != 0, this is a misaligned superpage."
-                            // "     Stop and raise a page-fault exception corresponding to the original access type."
-                            // "(2): When a virtual page is accessed and the A bit is clear, or is written and the D bit is clear,"
-                            // "     a page-fault exception is raised."
-                            // "(3): For G-stage address translation, all memory accesses are considered to be user-level accesses," 
-                            // "     as though executed in U-mode."
-                            if ((main_lvl_q == LVL1 && |pte.ppn[17:0] != 1'b0   ) ||       // 1G
-                                (main_lvl_q == LVL2 && |pte.ppn[8:0] != 1'b0    ) ||       // 2M
-                                (!pte.a || !pte.r || (is_store_i && !pte.d)    ) ||
-                                (ptw_stage_q != STAGE_1 && !pte.u              )) begin
-                                
+                            // "If i > 0 and pte.vpn[i − 1 : 0] != 0, this is a misaligned superpage."
+                            // "Stop and raise a page-fault exception corresponding to the original access type."
+                            if ((main_lvl_q == LVL1 && |pte.ppn[17:0] != 1'b0) ||   // 1G misaligned
+                                (main_lvl_q == LVL2 && |pte.ppn[8:0]  != 1'b0)) begin  // 2M misaligned
+
                                 pf_excep_n        = 1'b1;
-                                state_n             = ERROR;
-                                ptw_stage_n         = ptw_stage_q;
-                                update_o            = 1'b0;
-                                cdw_done_o          = 1'b0;
+                                state_n           = ERROR;
+                                ptw_stage_n       = ptw_stage_q;
+                                update_o          = 1'b0;
+                                cdw_done_o        = 1'b0;
+                            end
+
+                            // RISC-V H-ext: S2 leaf PTE must have U=1 (guest PTEs are always user-mode).
+                            // U=0 in a 2nd-stage leaf → raise guest page fault.
+                            if (ptw_stage_q != STAGE_1 && !pte.u) begin
+                                pf_excep_n  = 1'b1;
+                                state_n     = ERROR;
+                                ptw_stage_n = ptw_stage_q;
+                                update_o    = 1'b0;
+                                cdw_done_o  = 1'b0;
                             end
                         end : leaf_pte
                         

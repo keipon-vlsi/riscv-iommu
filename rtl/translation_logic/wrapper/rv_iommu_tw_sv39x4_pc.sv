@@ -160,10 +160,12 @@ module rv_iommu_tw_sv39x4_pc #(
 
     // To determine if transaction is a store
     logic is_store;
+    // Access tyep is wirte/AMO && not PCIe ATS
     assign is_store = ((&trans_type_i[1:0] == 1'b1) && (!trans_type_i[3]));
 
     // To determine if transaction is read-for-execute
     logic is_rx;
+    // Not PCIe ATS && Access type is read for execute
     assign is_rx = (!trans_type_i[3] && !trans_type_i[1] && trans_type_i[0]);
 
     // Efective iohgatp.ppn field to introduce in the PTW. May need to be forwarded by the CDW
@@ -181,6 +183,13 @@ module rv_iommu_tw_sv39x4_pc #(
     logic [(DC_WIDTH-1):0]      ddtc_up_content;
 
     rv_iommu::dc_base_t         dc_base;
+    // // Base format Device Context
+    // typedef struct packed {
+    //     fsc_t       fsc;
+    //     dc_ta_t     ta;
+    //     iohgatp_t   iohgatp;
+    //     tc_t        tc;
+    // } dc_base_t;
     assign dc_base = rv_iommu::dc_base_t'(ddtc_lu_content);
 
     // PDTC
@@ -221,6 +230,14 @@ module rv_iommu_tw_sv39x4_pc #(
     assign S1_en    = ((dc_base.tc.pdtv && pdtc_lu_content.fsc.mode != 4'b0000) ||
                        (!dc_base.tc.pdtv && dc_base.fsc.mode != 4'b0000)          );
     assign S2_en    = (dc_base.iohgatp.mode != 4'b0000);
+
+    // IOVA canonicalization fault signals
+    // Sv39: 39-bit VA, bits [63:38] must all equal bit 38 (sign-extended)
+    logic   iova_s1_ncanon;
+    assign  iova_s1_ncanon = (iova_i[63:38] != {26{iova_i[38]}});
+    // Sv39x4: 41-bit GPA, bits [63:41] must be zero
+    logic   iova_s2_ncanon;
+    assign  iova_s2_ncanon = |iova_i[63:41];
 
     // Alternative translation config for PTW implicit second-stage translations in CDW Walks
     logic   ptw_en_1S, ptw_en_2S;
@@ -482,7 +499,7 @@ module rv_iommu_tw_sv39x4_pc #(
         .en_1S_i                (ptw_en_1S          ),  // Enable signal for stage 1 translation. Defined by DC/PC
         .en_2S_i                (ptw_en_2S          ),  // Enable signal for stage 2 translation. Defined by DC only
         .is_store_i             (is_store           ),  // Indicate whether this translation was triggered by a store or a load
-        .is_rx_i                (is_rx              ),  // Read-for-execute
+        // .is_rx_i                (is_rx              ),  // Read-for-execute
 
         // PTW AXI Master memory interface
         .mem_resp_i             (ptw_axi_resp_i     ),  // Response port from memory
@@ -905,7 +922,13 @@ module rv_iommu_tw_sv39x4_pc #(
                         // PSCID not used since Stage 1 is Bare
                         iohgatp_ppn     = dc_base.iohgatp.ppn;
                         // iosatp not used since Stage 1 is Bare
-                        iotlb_access    = 1'b1;
+                        if (iova_s2_ncanon) begin
+                            wrap_error      = 1'b1;
+                            if (is_store) wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+                            else          wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+                        end else begin
+                            iotlb_access    = 1'b1;
+                        end
                     end
                 end
 
@@ -918,7 +941,17 @@ module rv_iommu_tw_sv39x4_pc #(
                         pscid           = dc_base.ta.pscid;
                         iohgatp_ppn     = dc_base.iohgatp.ppn;
                         iosatp_ppn      = dc_base.fsc.ppn;
-                        iotlb_access    = 1'b1;
+                        if (S1_en && iova_s1_ncanon) begin
+                            wrap_error      = 1'b1;
+                            if (is_store) wrap_cause_code = rv_iommu::STORE_PAGE_FAULT;
+                            else          wrap_cause_code = rv_iommu::LOAD_PAGE_FAULT;
+                        end else if (!S1_en && S2_en && iova_s2_ncanon) begin
+                            wrap_error      = 1'b1;
+                            if (is_store) wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+                            else          wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+                        end else begin
+                            iotlb_access    = 1'b1;
+                        end
                     end
 
                     // Process Context associated
@@ -931,7 +964,13 @@ module rv_iommu_tw_sv39x4_pc #(
                             // PSCID not used since Stage 1 is Bare
                             iohgatp_ppn     = dc_base.iohgatp.ppn;
                             // iosatp not used since Stage 1 is Bare
-                            iotlb_access    = 1'b1;
+                            if (S2_en && iova_s2_ncanon) begin
+                                wrap_error      = 1'b1;
+                                if (is_store) wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+                                else          wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+                            end else begin
+                                iotlb_access    = 1'b1;
+                            end
                         end
 
                         else pdtc_access = 1'b1;
@@ -953,7 +992,17 @@ module rv_iommu_tw_sv39x4_pc #(
                     pscid           = pdtc_lu_content.ta.pscid;
                     iohgatp_ppn     = dc_base.iohgatp.ppn;
                     iosatp_ppn      = pdtc_lu_content.fsc.ppn;
+                    if (S1_en && iova_s1_ncanon) begin
+                        wrap_error      = 1'b1;
+                        if (is_store) wrap_cause_code = rv_iommu::STORE_PAGE_FAULT;
+                        else          wrap_cause_code = rv_iommu::LOAD_PAGE_FAULT;
+                    end else if (!S1_en && S2_en && iova_s2_ncanon) begin
+                        wrap_error      = 1'b1;
+                        if (is_store) wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+                        else          wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+                    end else begin
                     iotlb_access    = 1'b1;
+                    end
                 end
             end
 
@@ -971,10 +1020,10 @@ module rv_iommu_tw_sv39x4_pc #(
                     - (3): U-mode transaction and PTE has U=0;
                     - (4): S-mode transaction and PTE has U=1 and (SUM=0 or x=1).
                 */
-                if  ((is_store && (!iotlb_lu_1S_content.w && S1_en)                                                 ) ||    // (1)
-                        (is_rx && (!iotlb_lu_1S_content.x && S1_en)                                                 ) ||    // (2)
-                        ((!priv_lvl_i) && !iotlb_lu_1S_content.u && S1_en                                           ) ||    // (3)
-                        (priv_lvl_i && iotlb_lu_1S_content.u && (!pdtc_lu_content.ta.sum || iotlb_lu_1S_content.x)  )       // (4)
+                if  ((is_store && (!iotlb_lu_1S_content.w && S1_en)                                                 ) ||        // (1)
+                        (is_rx && (!iotlb_lu_1S_content.x && S1_en)                                                 ) ||        // (2)
+                        ((!priv_lvl_i) && !iotlb_lu_1S_content.u && S1_en                                           ) ||        // (3)
+                        (priv_lvl_i && iotlb_lu_1S_content.u && (!pdtc_lu_content.ta.sum || iotlb_lu_1S_content.x) && S1_en  )  // (4)
                     ) begin
                         if (is_store)   wrap_cause_code = rv_iommu::STORE_PAGE_FAULT;
                         else            wrap_cause_code = rv_iommu::LOAD_PAGE_FAULT;
@@ -1065,7 +1114,7 @@ module rv_iommu_tw_sv39x4_pc #(
             wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
             wrap_error      = 1'b1;
         end
-    end
+    end 
 
     //# Error routing
     always_comb begin : error_routing
