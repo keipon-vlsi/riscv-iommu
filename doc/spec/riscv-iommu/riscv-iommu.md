@@ -534,11 +534,35 @@ Each valid non-leaf (NL) entry is 8-bytes in size and holds the PPN of the next 
 
 A valid leaf device-directory-table entry holds the device-context (DC).
 
-![](_page_23_Picture_4.jpeg)
+**Device Directory Table (DDT) Radix-Tree Traversal**
+
+* **3-Level Traversal:**
+    * `ddtp` ➔ **[ NL ]** （Indexed by `DDI[2]` 9-bit）
+    * ➔ **[ NL ]** （Indexed by `DDI[1]` 9-bit）
+    * ➔ **[ DC ]** （Indexed by `DDI[0]` 6-bit）
+
+* **2-Level Traversal:**
+    * `ddtp` ➔ **[ NL ]** （Indexed by `DDI[1]` 9-bit）
+    * ➔ **[ DC ]** （Indexed by `DDI[0]` 6-bit）
+
+* **1-Level Traversal:**
+    * `ddtp` ➔ **[ DC ]** （Indexed by `DDI[0]` 6-bit）
+
+> ※ `ddtp`: Device Directory Table Pointer / `NL`: Node Level (Directory) / `DC`: Device Context
 
 *Figure 10. Three, two and single-level device directory with extended format* DC
 
-![](_page_23_Picture_6.jpeg)
+* **3-Level Traversal:**
+    * `ddtp` ➔ **[ NL ]** （Indexed by `DDI[2]` 8-bit）
+    * ➔ **[ NL ]** （Indexed by `DDI[1]` 9-bit）
+    * ➔ **[ DC ]** （Indexed by `DDI[0]` 7-bit）
+
+* **2-Level Traversal:**
+    * `ddtp` ➔ **[ NL ]** （Indexed by `DDI[1]` 9-bit）
+    * ➔ **[ DC ]** （Indexed by `DDI[0]` 7-bit）
+
+* **1-Level Traversal:**
+    * `ddtp` ➔ **[ DC ]** （Indexed by `DDI[0]` 7-bit）
 
 *Figure 11. Three, two and single-level device directory with base format* DC
 
@@ -546,7 +570,9 @@ A valid leaf device-directory-table entry holds the device-context (DC).
 
 A valid (V==1) non-leaf DDT entry provides the PPN of the next level DDT.
 
-![](_page_23_Figure_10.jpeg)
+| Bits  | 63:54    | 53:10 | 9:1      | 0 |
+| :---- | :------: | :---: | :------: | :-: |
+| **Field** | reserved | PPN   | reserved | V |
 
 *Figure 12. Non-leaf device-directory-table entry*
 
@@ -556,10 +582,26 @@ The leaf DDT page is indexed by DDI[0] and holds the device-context (DC).
 
 In base-format the DC is 32-bytes. In extended-format the DC is 64-bytes.
 
-| Figure 13. Base-format device-context |
-|---------------------------------------|
 
-![](_page_24_Figure_5.jpeg)
+| Bits | Field |
+| :--- | :--- |
+| **255:192** | First-stage-context (`fsc`) |
+| **191:128** | Translation-attributes (`ta`) |
+| **127:64** | IO Hypervisor guest address translation and protection (`iohgatp`) |
+| **63:0** | Translation-control (`tc`) |
+
+*Figure 13. Base-format device-context*
+
+| Bits | Field |
+| :--- | :--- |
+| **511:448** | reserved |
+| **447:384** | MSI-address-pattern (`msi_addr_pattern`) |
+| **383:320** | MSI-address-mask (`msi_addr_mask`) |
+| **319:256** | MSI-page-table pointer (`msiptp`) |
+| **255:192** | First-stage-context (`fsc`) |
+| **191:128** | Translation-attributes (`ta`) |
+| **127:64** | IO Hypervisor guest address translation and protection (`iohgatp`) |
+| **63:0** | Translation-control (`tc`) |
 
 *Figure 14. Extended-format device-context*
 
@@ -569,16 +611,23 @@ The DC is interpreted as four 64-bit doublewords in base-format and as eight 64-
 
 ### <span id="page-25-1"></span>3.1.3.1. Translation control (**tc**)
 
-| 63 |          |     |     |     |     |      |      |      |      |      |       |        |        | 48 |
-|----|----------|-----|-----|-----|-----|------|------|------|------|------|-------|--------|--------|----|
-|    | '        |     |     |     |     | rese | rved |      |      |      |       |        |        |    |
-| 47 |          |     |     |     |     |      |      |      |      |      |       |        |        | 32 |
-|    | ,        |     |     |     |     | rese | rved |      |      |      |       |        |        |    |
-| 31 |          |     |     |     |     | 24   | 23   |      |      |      |       |        |        | 16 |
-|    | '        | cus | tom |     |     |      |      |      |      | rese | erved |        |        |    |
-| 15 | <u> </u> | 12  | 11  | 10  | 9   | 8    | 7    | 6    | 5    | 4    | 3     | 2      | 1      | 0  |
-|    | reserved | '   | SXL | SBE | DPE | SADE | GADE | PRPR | PDTV | DTF  | T2GPA | EN_PRI | EN_ATS | V  |
-
+| Bits | Field |
+| :--- | :--- |
+| **63:32** | reserved |
+| **31:24** | custom |
+| **23:12** | reserved |
+| **11** | SXL |
+| **10** | SBE |
+| **9** | DPE |
+| **8** | SADE |
+| **7** | GADE |
+| **6** | PRPR |
+| **5** | PDTV |
+| **4** | DTF |
+| **3** | T2GPA |
+| **2** | EN_PRI |
+| **1** | EN_ATS |
+| **0** | V |
 *Figure 15. Translation control (*tc*) field*
 
 DC is valid if the V bit is 1; If it is 0, all other bits in DC are don't-care and may be freely used by software.

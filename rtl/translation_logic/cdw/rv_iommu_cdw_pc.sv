@@ -612,7 +612,8 @@ module rv_iommu_cdw_pc #(
                             else if (MSITrans == rv_iommu::MSI_DISABLED) begin
                                 // only if DC have an associated PC and Stage-2 is enabled, pdtp.PPN must be translated before being stored
                                 // otherwise, fsc.PPN holds iosatp field, which must be saved as a GPA
-                                if (en_stage2_i && dc_tc_q.pdtv)
+                                // if (en_stage2_i && dc_tc_q.pdtv)
+                                if (dc_iohgatp_q.mode != 4'b0000 && dc_tc_q.pdtv)
                                     state_n = GUEST_TR;
                             end
                         end

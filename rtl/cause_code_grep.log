@@ -1,0 +1,99 @@
+./riscv_iommu.sv:153:    logic [(rv_iommu::CAUSE_LEN-1):0]   cause_code;         // Code of the occurred fault
+./riscv_iommu.sv:533:        .cause_code_o       (cause_code     ),  // Fault code in case of error
+./riscv_iommu.sv:647:        .cause_code_i       (cause_code),       // Fault code defined by translation logic
+./translation_logic/cdw/rv_iommu_cdw.sv:43:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,           // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/cdw/rv_iommu_cdw.sv:227:        cause_code_o            = '0;
+./translation_logic/cdw/rv_iommu_cdw.sv:480:                cause_code_o = cause_q;
+./translation_logic/cdw/rv_iommu_cdw_pc.sv:43:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,           // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/cdw/rv_iommu_cdw_pc.sv:280:        cause_code_o            = '0;
+./translation_logic/cdw/rv_iommu_cdw_pc.sv:695:                cause_code_o = cause_q;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:45:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:322:        cause_code_o            = '0;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:741:                    cause_code_o = cause_q;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:746:                            if (is_store_i) cause_code_o = rv_iommu::STORE_GUEST_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:747:                            else            cause_code_o = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:750:                            if (is_store_i) cause_code_o = rv_iommu::STORE_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv:751:                            else            cause_code_o = rv_iommu::LOAD_PAGE_FAULT;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:45:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:322:        cause_code_o            = '0;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:741:                    cause_code_o = cause_q;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:746:                            if (is_store_i) cause_code_o = rv_iommu::STORE_GUEST_PAGE_FAULT;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:747:                            else            cause_code_o = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:750:                            if (is_store_i) cause_code_o = rv_iommu::STORE_PAGE_FAULT;
+./translation_logic/ptw/copy_rv_iommu_ptw_sv39x4_pc.sv:751:                            else            cause_code_o = rv_iommu::LOAD_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:44:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:308:        cause_code_o            = '0;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:677:                    cause_code_o = cause_q;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:682:                            if (is_store_i) cause_code_o = rv_iommu::STORE_GUEST_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:683:                            else            cause_code_o = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:686:                            if (is_store_i) cause_code_o = rv_iommu::STORE_PAGE_FAULT;
+./translation_logic/ptw/rv_iommu_ptw_sv39x4.sv:687:                            else            cause_code_o = rv_iommu::LOAD_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:89:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,       // Fault code defined by translation logic
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:201:    logic [(rv_iommu::CAUSE_LEN-1):0]  wrap_cause_code;  // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:204:    logic [(rv_iommu::CAUSE_LEN-1):0]  cdw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:207:    logic [(rv_iommu::CAUSE_LEN-1):0]  ptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:210:    logic [(rv_iommu::CAUSE_LEN-1):0]  msiptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:213:    logic [(rv_iommu::CAUSE_LEN-1):0]  mrif_handler_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:409:        .cause_code_o           (ptw_cause_code     ),
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:533:            .cause_o            ( msiptw_cause_code     )
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:564:        assign msiptw_cause_code    = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:602:            .cause_o        (mrif_handler_cause_code)
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:654:        assign mrif_handler_cause_code  = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:677:        .cause_code_o           (cdw_cause_code     ),  // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:728:        wrap_cause_code     = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:740:                wrap_cause_code = rv_iommu::ALL_INB_TRANSACTIONS_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:750:                    wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:764:                wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:781:                wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:834:                        if (is_store)   wrap_cause_code = rv_iommu::STORE_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:835:                        else            wrap_cause_code = rv_iommu::LOAD_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:843:                        if (is_store)   wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:844:                        else            wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:919:            wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:935:            wrap_error:         cause_code_o = wrap_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:936:            cdw_error:          cause_code_o = cdw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:937:            ptw_error:          cause_code_o = ptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:938:            msiptw_error:       cause_code_o = msiptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:939:            mrif_handler_error: cause_code_o = mrif_handler_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:940:            msi_write_error_i:  cause_code_o = rv_iommu::MSI_ST_ACCESS_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4.sv:941:            default:            cause_code_o = '0;
+./translation_logic/wrapper/rv_iommu_translation_wrapper.sv:90:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,       // Fault code defined by translation logic
+./translation_logic/wrapper/rv_iommu_translation_wrapper.sv:178:                .cause_code_o,          // Fault code defined by translation logic
+./translation_logic/wrapper/rv_iommu_translation_wrapper.sv:258:                .cause_code_o,          // Fault code defined by translation logic
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:92:    output logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_o,       // Fault code defined by translation logic
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:235:    logic [(rv_iommu::CAUSE_LEN-1):0]  wrap_cause_code;  // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:238:    logic [(rv_iommu::CAUSE_LEN-1):0]  cdw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:241:    logic [(rv_iommu::CAUSE_LEN-1):0]  ptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:244:    logic [(rv_iommu::CAUSE_LEN-1):0]  msiptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:247:    logic [(rv_iommu::CAUSE_LEN-1):0]  mrif_handler_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:480:        .cause_code_o           (ptw_cause_code     ),
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:611:            .cause_o            ( msiptw_cause_code     )
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:642:        assign msiptw_cause_code    = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:680:            .cause_o        (mrif_handler_cause_code)
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:732:        assign mrif_handler_cause_code  = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:754:        .cause_code_o           (cdw_cause_code     ),  // Fault code as defined by IOMMU and Priv Spec
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:831:        wrap_cause_code     = '0;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:843:                wrap_cause_code    = rv_iommu::ALL_INB_TRANSACTIONS_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:853:                    wrap_cause_code    = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:867:                wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:886:                wrap_cause_code  = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:947:                    wrap_cause_code    = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:979:                        if (is_store)   wrap_cause_code = rv_iommu::STORE_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:980:                        else            wrap_cause_code = rv_iommu::LOAD_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:988:                        if (is_store)   wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:989:                        else            wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1065:            wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1081:            wrap_error:         cause_code_o = wrap_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1082:            cdw_error:          cause_code_o = cdw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1083:            ptw_error:          cause_code_o = ptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1084:            msiptw_error:       cause_code_o = msiptw_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1085:            mrif_handler_error: cause_code_o = mrif_handler_cause_code;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1086:            msi_write_error_i:  cause_code_o = rv_iommu::MSI_ST_ACCESS_FAULT;
+./translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv:1087:            default:            cause_code_o = '0;
+./software_interface/wrapper/rv_iommu_sw_if_wrapper.sv:111:    input  logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_i,   // Fault code defined by translation logic
+./software_interface/wrapper/rv_iommu_sw_if_wrapper.sv:373:        .cause_code_i           (cause_code_i),         // Fault code as defined by IOMMU and Priv Spec
+./software_interface/rv_iommu_fq_handler.sv:71:    input  logic [(rv_iommu::CAUSE_LEN-1):0]    cause_code_i,       // Fault code as defined by IOMMU and Priv Spec
+./software_interface/rv_iommu_fq_handler.sv:137:    logic [(rv_iommu::CAUSE_LEN-1):0]   cause_code;   
+./software_interface/rv_iommu_fq_handler.sv:165:        .data_i     ( {trans_type_i, cause_code_i, iova_i, gpaddr_i, did_i, pv_i, pid_i, is_supervisor_i, is_guest_pf_i, is_implicit_i}),
+./software_interface/rv_iommu_fq_handler.sv:167:        .data_o     ( {trans_type, cause_code, iova, gpaddr, did, pv, pid, is_supervisor, is_guest_pf, is_implicit} ),
+./software_interface/rv_iommu_fq_handler.sv:281:                        fq_entry_n.cause    = cause_code;

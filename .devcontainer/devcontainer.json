@@ -1,14 +1,102 @@
+// =============================================================================
+// .devcontainer/devcontainer.json
+// VSCode (or Cursor) の Dev Containers 拡張から本コンテナを開くための設定。
+//
+// 使い方:
+//   1. VSCode 拡張 "Dev Containers" (ms-vscode-remote.remote-containers) を入れる
+//   2. repo を VSCode で開く
+//   3. 左下 "><" → "Reopen in Container" を選ぶ
+//   4. 初回はコンテナビルドで数分かかる。2 回目以降は数秒。
+//
+// 既存の docker/Dockerfile + docker-compose.yml を再利用しているので、
+// CLI 派 (docker compose run) と IDE 派 (Dev Containers) のどちらも壊さない。
+// =============================================================================
 {
-  "name": "IOMMU Verification Env",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "mshantz.language-verilog",
-        "ms-python.python"
-      ]
-    }
-  }
+    "name": "riscv-iommu-kawano",
+
+    // 既存の compose 設定を流用 — service 名 'cocotb' をそのまま使う
+    "dockerComposeFile": "../docker/docker-compose.yml",
+    "service": "cocotb",
+
+    // コンテナ内のどこを VSCode のワークスペースとして開くか
+    "workspaceFolder": "/workspace",
+
+    // ホスト側の uid/gid をコンテナに合わせる
+    "remoteUser": "dev",
+
+    // ---- 拡張機能 (コンテナ側にインストールされる) ----
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                // Python / cocotb
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "ms-python.debugpy",
+
+                // SystemVerilog
+                "mshr-h.veriloghdl",
+                "eirikpre.systemverilog",
+
+                // C / C++ (gen_vectors.c デバッグ用)
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+
+                // Makefile
+                "ms-vscode.makefile-tools",
+
+                // YAML / Docker (compose ファイル編集用)
+                "redhat.vscode-yaml",
+                "ms-azuretools.vscode-docker",
+
+                // Markdown プレビュー (spec/*.md を読みながら作業する用)
+                "yzhang.markdown-all-in-one",
+
+                // Git 周り
+                "eamodio.gitlens",
+
+                // 波形 (.vcd / .fst) のプレビュー
+                "wavedrom.vscode-wavedrom"
+            ],
+
+            // ---- VSCode 設定の上書き (コンテナ側だけ) ----
+            "settings": {
+                // venv を自動認識
+                "python.defaultInterpreterPath": "/opt/venv/bin/python",
+                "python.terminal.activateEnvironment": false,
+
+                // pytest を有効化 (cocotb-test を Test Explorer に出す)
+                "python.testing.pytestEnabled": true,
+                "python.testing.pytestArgs": [
+                    "tb_coco/test/_example/iommu_smoke/scenarios"
+                ],
+
+                // SystemVerilog の include path (RTL_ROOT 相対)
+                "systemverilog.includeIndexing": [
+                    "rtl/**/*.{sv,svh}",
+                    "packages/**/*.{sv,svh}",
+                    "vendor/**/*.{sv,svh}",
+                    "include/**/*.{sv,svh}",
+                    "tb_coco/test/_example/iommu_smoke/**/*.{sv,svh}"
+                ],
+                "systemverilog.excludeIndexing": "**/sim_build/**",
+
+                // ターミナル既定を bash に
+                "terminal.integrated.defaultProfile.linux": "bash",
+
+                // 改行コードを LF に固定 (Windows ホストでも壊れないように)
+                "files.eol": "\n"
+            }
+        }
+    },
+
+    // コンテナ生成直後に走らせるコマンド (毎回ではなく initial のみ)
+    "postCreateCommand": "git config --global --add safe.directory /workspace && git config --global --add safe.directory /workspace/third_party/iommu-reference",
+
+    // 環境変数
+    "remoteEnv": {
+        "PYTHONUNBUFFERED": "1"
+    },
+
+    // VSCode が立ち上がるまでに必要なポート (今回は無し。将来 GUI を出すなら追加)
+    "forwardPorts": []
 }

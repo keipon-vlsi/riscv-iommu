@@ -1,0 +1,1423 @@
+╭─── Claude Code v2.1.117 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                  Welcome back Kei!                 │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│     Sonnet 4.6 · Claude Pro ·                      │                         │
+│     claude.kei.kansei@gmail.com's Organization     │                         │
+│         ~/…/tb_coco/translation_logic/ptw          │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu/rtl/translation_logi 
+  c/ptw/rv_iommu_ptw_sv39x4_pc.sv                                               
+  このモジュールで使用されているis_store_iとis_rx_iの生成元を調べて、どんな条件 
+  の時に1になっているかを教えて。                                               
+
+⏺ まずそのファイルを読んで、信号の使われ方を確認します。
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ 次に、このモジュールをインスタンス化している上位モジュールを探します。
+
+  Searched for 3 patterns (ctrl+o to expand)
+
+⏺ trans_type_i の定義とエンコーディングも確認します。
+
+  Searched for 4 patterns (ctrl+o to expand)
+
+⏺ Bash(find /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu -name
+      "*.sv" | xargs grep -l "TTYP_LEN\|UNTRANSLATED_RX" 2>/dev/null)
+  ⎿  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu/rtl/riscv_iom
+     mu.sv
+     /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu/rtl/software_
+     … +11 lines (ctrl+o to expand)
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ trans_type がトップレベルでどう生成されるかも確認します。
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ 必要な情報が揃いました。まとめます。
+
+  ---
+  is_store_i と is_rx_i の生成元と条件
+
+  生成元
+
+  どちらも上位の wrapper モジュール rv_iommu_tw_sv39x4_pc.sv で trans_type_i
+  から生成されています。
+
+  // rv_iommu_tw_sv39x4_pc.sv:163
+  assign is_store = ((&trans_type_i[1:0] == 1'b1) && (!trans_type_i[3]));
+
+  // rv_iommu_tw_sv39x4_pc.sv:167
+  assign is_rx = (!trans_type_i[3] && !trans_type_i[1] && trans_type_i[0]);
+
+  ---
+  trans_type_i のエンコーディング（rv_iommu_pkg.sv:353-364）
+
+  ┌────────────────────┬─────────────────┬────────┬──────────┐
+  │       定数名       │ ビット値 (6bit) │ bit[3] │ bit[1:0] │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ NONE               │ 000000          │ 0      │ 00       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ UNTRANSLATED_RX    │ 000001          │ 0      │ 01       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ UNTRANSLATED_R     │ 000010          │ 0      │ 10       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ UNTRANSLATED_W     │ 000011          │ 0      │ 11       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ TRANSLATED_RX      │ 000101          │ 0      │ 01       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ TRANSLATED_R       │ 000110          │ 0      │ 10       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ TRANSLATED_W       │ 000111          │ 0      │ 11       │
+  ├────────────────────┼─────────────────┼────────┼──────────┤
+  │ PCIE_ATS_TRANS_REQ │ 001000          │ 1      │ 00       │
+  └────────────────────┴─────────────────┴────────┴──────────┘
+
+  ---
+  各信号が1になる条件
+
+  is_store_i
+  - trans_type_i[1:0] == 2'b11 かつ trans_type_i[3] == 0 のとき
+  - 対応するトランザクション: UNTRANSLATED_W または TRANSLATED_W
+  - 意味：Write / AMO（Atomic Memory Operation）アクセス のとき1になる
+  - トップレベル (riscv_iommu.sv:906) では AXI の書き込みチャネル (AW)
+  のリクエストが来たとき trans_type = UNTRANSLATED_W がセットされる
+
+  is_rx_i
+  - trans_type_i[0] == 1 かつ trans_type_i[1] == 0 かつ trans_type_i[3] == 0
+  のとき
+  - 対応するトランザクション: UNTRANSLATED_RX または TRANSLATED_RX
+  - 意味：Read-for-Execute（命令フェッチ） アクセスのとき1になる
+  - トップレベル (riscv_iommu.sv:866) では AXI 読み込みチャネル (AR) の
+  AxPROT[2] == 1（= Instruction access）のとき trans_type = UNTRANSLATED_RX
+  がセットされる
+
+  ---
+  PTW モジュール内での使われ方
+
+  ┌─────────┬────────────────────┬─────────────────────────────────────────┐
+  │  信号   │      使用箇所      │                  用途                   │
+  ├─────────┼────────────────────┼─────────────────────────────────────────┤
+  │ is_stor │ line 183           │ MSI アドレス判定（MSI                   │
+  │ e_i     │                    │ 翻訳はストアアクセスにのみ適用）        │
+  ├─────────┼────────────────────┼─────────────────────────────────────────┤
+  │ is_stor │                    │ リーフ PTE の Dirty ビット (pte.d)      │
+  │ e_i     │ line 538           │ チェック。ストアなのに D=0              │
+  │         │                    │ ならページフォルト                      │
+  ├─────────┼────────────────────┼─────────────────────────────────────────┤
+  │ is_stor │ line 711, 715      │ エラー時のフォルトコード選択（STORE_PAG │
+  │ e_i     │                    │ E_FAULT vs LOAD_PAGE_FAULT）            │
+  ├─────────┼────────────────────┼─────────────────────────────────────────┤
+  │ is_rx_i │ このモジュールでは │ ポートとして受け取るだけで内部ロジック  │
+  │         │ 未使用             │ には現れない                            │
+  └─────────┴────────────────────┴─────────────────────────────────────────┘
+
+  is_rx_i は PTW 内では使われておらず、wrapper が IOTLB
+  ヒット時のアクセス権限チェック（pte.x
+  ビットの確認）で直接使用しています（rv_iommu_tw_sv39x4_pc.sv:975, 986）。
+
+✻ Sautéed for 1m 38s
+
+※ recap: We traced where is_store_i and is_rx_i come from in rv_iommu_ptw_sv39x4_pc.sv. Both are derived from trans_type_i in the wrapper and were fully explained. No next action needed unless you have follow-up questions. (disable recaps in /config)
+
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu/rtl                  
+  このディレクトリ内のIOMMUでERRORまたはFAULTを発生させているところを全て調べて 
+  その発生条件とcause_codeをまとめて                                            
+
+⏺ Explore(IOMMU error/fault generation survey)
+  ⎿  Done (23 tool uses · 101.9k tokens · 7m 50s)
+  (ctrl+o to expand)
+
+⏺ 調査結果をまとめます。
+
+  ---
+  IOMMU RTL ERROR/FAULT 発生箇所まとめ
+
+  ---
+  0. cause_code 定数一覧（rv_iommu_pkg.sv）
+
+  ┌────────────────────────────────┬─────┬───────────────────────────────────┐
+  │             定数名             │ 値  │               意味                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ INSTR_ACCESS_FAULT             │ 1   │ 命令アクセス違反                  │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ LD_ACCESS_FAULT                │ 5   │ ロードアクセス違反                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ ST_ACCESS_FAULT                │ 7   │ ストアアクセス違反                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ INSTR_PAGE_FAULT               │ 12  │ 命令ページフォルト                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ LOAD_PAGE_FAULT                │ 13  │ ロードページフォルト              │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ STORE_PAGE_FAULT               │ 15  │ ストアページフォルト              │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ INSTR_GUEST_PAGE_FAULT         │ 20  │ 命令ゲストページフォルト          │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ LOAD_GUEST_PAGE_FAULT          │ 21  │ ロードゲストページフォルト        │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ STORE_GUEST_PAGE_FAULT         │ 23  │ ストアゲストページフォルト        │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ ALL_INB_TRANSACTIONS_DISALLOWE │ 256 │ 全インバウンドトランザクション禁  │
+  │ D                              │     │ 止                                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ DDT_ENTRY_LD_ACCESS_FAULT      │ 257 │ DDT エントリ ロードアクセス違反   │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ DDT_ENTRY_INVALID              │ 258 │ DDT エントリ無効                  │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ DDT_ENTRY_MISCONFIGURED        │ 259 │ DDT エントリ設定誤り              │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ TRANS_TYPE_DISALLOWED          │ 260 │ トランザクション型不許可          │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_PTE_LD_ACCESS_FAULT        │ 261 │ MSI PTE ロードアクセス違反        │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_PTE_INVALID                │ 262 │ MSI PTE 無効                      │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_PTE_MISCONFIGURED          │ 263 │ MSI PTE 設定誤り                  │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MRIF_ACCESS_FAULT              │ 264 │ MRIF アクセス違反                 │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ PDT_ENTRY_LD_ACCESS_FAULT      │ 265 │ PDT エントリ ロードアクセス違反   │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ PDT_ENTRY_INVALID              │ 266 │ PDT エントリ無効                  │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ PDT_ENTRY_MISCONFIGURED        │ 267 │ PDT エントリ設定誤り              │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ DDT_DATA_CORRUPTION            │ 268 │ DDT データ破損                    │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ PDT_DATA_CORRUPTION            │ 269 │ PDT データ破損                    │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_PT_DATA_CORRUPTION         │ 270 │ MSI ページテーブル データ破損     │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_MRIF_DATA_CORRUPTION       │ 271 │ MSI MRIF データ破損               │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ INTERN_DATAPATH_FAULT          │ 272 │ 内部データパス違反                │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ MSI_ST_ACCESS_FAULT            │ 273 │ MSI ストアアクセス違反            │
+  ├────────────────────────────────┼─────┼───────────────────────────────────┤
+  │ PT_DATA_CORRUPTION             │ 274 │ ページテーブル データ破損         │
+  └────────────────────────────────┴─────┴───────────────────────────────────┘
+
+  ---
+  1. CDW（rv_iommu_cdw.sv）
+
+  DDT のウォーク中に発生するフォルト。
+
+  ┌─────┬──────────────────────────────────────────┬─────────────────────────┐
+  │ 行  │                 発生条件                 │       cause_code        │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 313 │ Non-leaf DDT エントリの valid ビット     │ DDT_ENTRY_INVALID       │
+  │     │ (nl.v) が 0                              │                         │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 342 │ Non-leaf DDT エントリの reserved bits    │ DDT_ENTRY_MISCONFIGURED │
+  │     │ が非ゼロ                                 │                         │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 376 │ DC の tc.v == 0                          │ DDT_ENTRY_INVALID       │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 383 │ dc_tc.pdtv == 1 だが PDT 未サポート      │ TRANS_TYPE_DISALLOWED   │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 390 │ DC.tc の設定不正（ATS/T2GPA/AMD/SXL 等） │ DDT_ENTRY_MISCONFIGURED │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 410 │ DC.iohgatp                               │ DDT_ENTRY_MISCONFIGURED │
+  │     │ のモード不正またはケーパビリティ不一致   │                         │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 429 │ DC.ta の reserved bits が非ゼロ          │ DDT_ENTRY_MISCONFIGURED │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 441 │ DC.fsc                                   │ DDT_ENTRY_MISCONFIGURED │
+  │     │ のモード不正またはケーパビリティ不一致   │                         │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 459 │ MSI フィールド（msiptp, msi_addr_mask,   │ DDT_ENTRY_MISCONFIGURED │
+  │     │ msi_addr_pattern）の設定不正             │                         │
+  ├─────┼──────────────────────────────────────────┼─────────────────────────┤
+  │ 495 │ AXI read レスポンスエラー（r.resp !=     │ DDT_DATA_CORRUPTION     │
+  │     │ RESP_OKAY）                              │                         │
+  └─────┴──────────────────────────────────────────┴─────────────────────────┘
+
+  ---
+  2. CDW-PC（rv_iommu_cdw_pc.sv）
+
+  DDT および PDT 両方のウォークに対応した版。
+
+  DDT ウォーク中：
+
+  ┌─────┬─────────────────────────┬─────────────────────────────────────────┐
+  │ 行  │        発生条件         │               cause_code                │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │     │ Non-leaf エントリの     │ DDT_ENTRY_INVALID または                │
+  │ 408 │ nl.v == 0               │ PDT_ENTRY_INVALID（is_ddt_walk_q        │
+  │     │                         │ で分岐）                                │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 416 │ Non-leaf エントリの     │ DDT_ENTRY_MISCONFIGURED または          │
+  │     │ reserved bits が非ゼロ  │ PDT_ENTRY_MISCONFIGURED                 │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 535 │ DC の tc.v == 0         │ DDT_ENTRY_INVALID                       │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 542 │ DC.tc の設定不正        │ DDT_ENTRY_MISCONFIGURED                 │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 560 │ DC.iohgatp のモード不正 │ DDT_ENTRY_MISCONFIGURED                 │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 576 │ DC.ta の reserved bits  │ DDT_ENTRY_MISCONFIGURED                 │
+  │     │ が非ゼロ                │                                         │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 587 │ DC.fsc の設定不正       │ DDT_ENTRY_MISCONFIGURED                 │
+  ├─────┼─────────────────────────┼─────────────────────────────────────────┤
+  │ 621 │ MSI フィールド設定不正  │ DDT_ENTRY_MISCONFIGURED                 │
+  └─────┴─────────────────────────┴─────────────────────────────────────────┘
+
+  PDT ウォーク中：
+
+  ┌─────┬──────────────────────┬────────────────────────────────────────────┐
+  │ 行  │       発生条件       │                 cause_code                 │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │ 498 │ PC の ta.v == 0      │ PDT_ENTRY_INVALID                          │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │ 505 │ PC.ta の reserved    │ PDT_ENTRY_MISCONFIGURED                    │
+  │     │ bits が非ゼロ        │                                            │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │ 516 │ PC.fsc の設定不正    │ PDT_ENTRY_MISCONFIGURED                    │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │     │ GUEST_TR ステートで  │                                            │
+  │ 657 │ non-leaf PDT         │ PDT_ENTRY_INVALID                          │
+  │     │ エントリの nl.v == 0 │                                            │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │     │ GUEST_TR ステートで  │                                            │
+  │ 664 │ reserved bits        │ PDT_ENTRY_MISCONFIGURED                    │
+  │     │ が非ゼロ             │                                            │
+  ├─────┼──────────────────────┼────────────────────────────────────────────┤
+  │     │                      │ DDT_DATA_CORRUPTION または                 │
+  │ 710 │ AXI read エラー      │ PDT_DATA_CORRUPTION（is_ddt_walk_q         │
+  │     │                      │ で分岐）                                   │
+  └─────┴──────────────────────┴────────────────────────────────────────────┘
+
+  ---
+  3. PTW（rv_iommu_ptw_sv39x4.sv / rv_iommu_ptw_sv39x4_pc.sv）
+
+  ページテーブルウォーク中に発生するフォルト。ERROR ステートで ptw_stage_q と
+  is_store_i の組み合わせによって最終的な cause_code を決定する。
+
+  pf_excep_n = 1 をセットする条件（→ ERROR 遷移）
+
+  ┌─────────────────┬────────────────────────────────────────────────────────┐
+  │ 行（sv39x4.sv） │                        発生条件                        │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 418             │ !pte.v または (!pte.r && pte.w) — PTE 無効             │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │                 │ スーパーページのミスアライン（ppn                      │
+  │ 516             │ 下位ビット非ゼロ）または !pte.a または !pte.r または   │
+  │                 │ (is_store_i && !pte.d)                                 │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 620             │ non-leaf PTE で A / D / U ビットが 1（reserved 扱い）  │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 628             │ LVL3 に達したのに non-leaf（i < 0 ページフォルト）     │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 636             │ PTE の reserved bits（pte.reserved）が非ゼロ           │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 644             │ Stage-1 ウォーク中に pte.ppn の上位ビットが GPPNW      │
+  │                 │ を超える                                               │
+  ├─────────────────┼────────────────────────────────────────────────────────┤
+  │ 660             │ AXI read エラー → pt_data_corrupt_n = 1（別フラグ）    │
+  └─────────────────┴────────────────────────────────────────────────────────┘
+
+  ERROR ステートでの cause_code 決定ロジック
+
+  pt_data_corrupt_q == 1  → cause_code = PT_DATA_CORRUPTION
+
+  pf_excep_q == 1:
+    ptw_stage_q != STAGE_1  →  ptw_error_2S_o = 1
+                                is_store_i = 1  → STORE_GUEST_PAGE_FAULT
+                                is_store_i = 0  → LOAD_GUEST_PAGE_FAULT
+    ptw_stage_q == STAGE_1  →  is_store_i = 1  → STORE_PAGE_FAULT
+                                is_store_i = 0  → LOAD_PAGE_FAULT
+
+  ptw_stage_q == STAGE_2_INTERMED → ptw_error_2S_int_o = 1（追加フラグ）
+
+  ---
+  4. MSI PTW（rv_iommu_msiptw.sv）
+
+  MSI アドレスの FLAT モードと MRIF モードそれぞれの FSM を持つ。
+
+  FLAT FSM：
+
+  ┌─────┬───────────────────────────────────────────┬────────────────────────┐
+  │ 行  │                 発生条件                  │       cause_code       │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 227 │ is_rx_i == 1（Read-for-Execute は MSI     │ INSTR_ACCESS_FAULT     │
+  │     │ 不許可）                                  │                        │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 298 │ !msi_pte_flat.v または msi_pte_flat.c —   │ MSI_PTE_INVALID        │
+  │     │ MSI PTE 無効                              │                        │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 304 │ AXI read エラー                           │ MSI_PT_DATA_CORRUPTION │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 328 │ MRIF モードだがハードウェア未サポート     │ MSI_PTE_MISCONFIGURED  │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 338 │ FLAT MSI PTE の reserved bits が非ゼロ    │ MSI_PTE_MISCONFIGURED  │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 352 │ MSI PTE モード値が不正                    │ MSI_PTE_MISCONFIGURED  │
+  └─────┴───────────────────────────────────────────┴────────────────────────┘
+
+  MRIF FSM：
+
+  ┌─────┬───────────────────────────────────────────┬────────────────────────┐
+  │ 行  │                 発生条件                  │       cause_code       │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 470 │ MSI PTE 前半 64-bit の reserved bits      │ MSI_PTE_MISCONFIGURED  │
+  │     │ が非ゼロ                                  │                        │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 498 │ MSI PTE 後半 64-bit の reserved bits      │ MSI_PTE_MISCONFIGURED  │
+  │     │ が非ゼロ                                  │                        │
+  ├─────┼───────────────────────────────────────────┼────────────────────────┤
+  │ 525 │ AXI read エラー                           │ MSI_PT_DATA_CORRUPTION │
+  └─────┴───────────────────────────────────────────┴────────────────────────┘
+
+  ---
+  5. MRIF Handler（rv_iommu_mrif_handler.sv）
+
+  cause_code は固定値 MSI_PT_DATA_CORRUPTION（= 270）、条件のみ異なる。
+
+  ┌─────┬──────────────────────────────────────────────┐
+  │ 行  │                   発生条件                   │
+  ├─────┼──────────────────────────────────────────────┤
+  │ 252 │ MRIF フェッチ中の AXI read エラー            │
+  ├─────┼──────────────────────────────────────────────┤
+  │ 298 │ MRIF 書き込み完了後の AXI B チャネルエラー   │
+  ├─────┼──────────────────────────────────────────────┤
+  │ 348 │ Notice MSI 書き込み後の AXI B チャネルエラー │
+  └─────┴──────────────────────────────────────────────┘
+
+  ---
+  6. Fault Queue Handler（rv_iommu_fq_handler.sv）
+
+  フォルトそのものの発生ではなく、上流からのエラー情報を FQ
+  メモリへ書き込む。以下の場合に FQ 自体がエラー状態になる。
+
+  ┌──────────────────────────────────────────────┬──────────────────────────┐
+  │                     条件                     │          フラグ          │
+  ├──────────────────────────────────────────────┼──────────────────────────┤
+  │ FQ が満杯（fq_tail == fq_head -              │ fq_of_o = 1（Overflow）  │
+  │ 1）で新規イベント                            │                          │
+  ├──────────────────────────────────────────────┼──────────────────────────┤
+  │ FQ への AXI write で Bチャネルエラー         │ fq_mf_o = 1（Memory      │
+  │                                              │ Fault）                  │
+  └──────────────────────────────────────────────┴──────────────────────────┘
+
+  ---
+  エラー伝播の全体像
+
+  CDW / PTW / MSIPTW / MRIF Handler
+      │ error_o, cause_code_o
+      ▼
+  riscv_iommu.sv（メインコントローラ）
+      │ event_valid_i, cause_code_i, iova, gpaddr, did, pid...
+      ▼
+  rv_iommu_fq_handler.sv
+      │ AXI Write（256-bit FQ record）
+      ▼
+  FQ メモリ（ソフトウェアが読み出してデバッグ）
+
+✻ Baked for 2m 47s
+
+※ recap: Investigated all ERROR/FAULT generation points across the RISC-V IOMMU RTL. Compiled cause codes, trigger conditions, and propagation paths for CDW, PTW, MSI PTW, MRIF Handler, and FQ Handler into a structured summary. No next action pending. (disable recaps in /config)
+
+❯ 会話の内容を全てファイルに保存しておきたいんだけど                            
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ markdown/ ディレクトリがありますね。そこに保存します。
+
+⏺ Write(~/Desktop/project/tt_pretraining/markdown/iommu_rtl_error_fault_analysis
+       .md)
+  ⎿  Wrote 249 lines to
+     ../../../../markdown/iommu_rtl_error_fault_analysis.md
+       2 # RISC-V IOMMU RTL エラー・フォルト解析メモ
+       3 調査日: 2026-04-22  
+       4 対象リポジトリ: `riscv-iommu/rtl`
+       5 
+       6 ---
+       7 
+       8 ## Q1. `is_store_i` と `is_rx_i` の生成元と条件
+       9 
+      10 対象ファイル: `riscv-iommu/rtl/translation_logic/ptw/rv_iommu_pt
+         w_sv39x4_pc.sv`
+     … +293 lines (ctrl+o to expand)
+
+⏺ /Users/keipon/Desktop/project/tt_pretraining/markdown/iommu_rtl_error_fault_an
+  alysis.md に保存しました。
+
+  この会話の内容（is_store_i/is_rx_i の調査結果と、IOMMU RTL の全 ERROR/FAULT
+  まとめ）を両方含めています。
+
+✻ Cooked for 1m 8s
+
+※ recap: Investigating the RISC-V IOMMU RTL source to understand error and fault generation. The analysis is complete and saved to markdown/iommu_rtl_error_fault_analysis.md. (disable recaps in /config)
+
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/rtl/translati 
+  on_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv                                        
+                                                                                
+  このモジュールのPTEのチェックについて仕様を変更したい。このモジュール内ではpa 
+  ge table                                                                      
+  walk中のエラーは全て検出。LEAFのPTEに関しては、VALIDかINVALIDか、reserved     
+  bitsが０かなどPTEそのものが有効化のチェックのみ行い、権限チェックは行わない。 
+  有効なLEAF PTEは一旦キャッシュに登録する。というような設計に変更したい。      
+⏺ まず対象ファイルを読んで現状を把握します。
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ 変更が必要な箇所を把握しました。整理します。
+
+  現在の LEAF PTE チェック（lines 553-569）にある条件を分類すると：
+
+  ┌────────────────────┬────────────────────────────────────────────┬────────┐
+  │        条件        │                    種別                    │ 変更後 │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ main_lvl_q == LVL1 │ 構造的有効性（スーパーページミスアライン） │ 残す   │
+  │  && |pte.ppn[17:0] │                                            │        │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ main_lvl_q == LVL2 │ 構造的有効性（スーパーページミスアライン） │ 残す   │
+  │  && |pte.ppn[8:0]  │                                            │        │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ !pte.a             │ A ビット（アクセス追跡）                   │ 削除   │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ !pte.r             │ 読み取り権限                               │ 削除   │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ is_store_i &&      │ D ビット（ストア権限）                     │ 削除   │
+  │ !pte.d             │                                            │        │
+  ├────────────────────┼────────────────────────────────────────────┼────────┤
+  │ ptw_stage_q !=     │ U ビット（G-stage ユーザー権限）           │ 削除   │
+  │ STAGE_1 && !pte.u  │                                            │        │
+  └────────────────────┴────────────────────────────────────────────┴────────┘
+
+  それ以外は変更しない：
+  - !pte.v || (!pte.r && pte.w) — PTE 無効（構造的） → 残す
+  - non-leaf PTE の A/D/U チェック → 残す（これらは仕様上 reserved）
+  - pte.reserved チェック → 残す
+  - GPA 上位ビットオーバーフローチェック → 残す
+  - AXI エラー → 残す
+
+  では変更します。
+
+⏺ Update(~/Desktop/project/tt_pretraining/riscv-iommu-kawano/rtl/translation_log
+        ic/ptw/rv_iommu_ptw_sv39x4_pc.sv)
+  ⎿  Added 11 lines, removed 17 lines
+      539                              endcase
+      540  
+      541                              //# Valid translation found (eithe
+           r 1G, 2M or 4K entry): Update IOTLB
+      542 -                            // IOTLB is updated only if PTE ch
+          -ecks are passed,                                              
+      543 -                            // so that these checks do not nee
+          -d to be performed again on an IOTLB hit                       
+      542 +                            // Permission checks (A/D/R/U bits
+          +) are deferred to the IOTLB hit path.                         
+      543 +                            // Only structural validity is che
+          +cked here.                                                    
+      544  
+      545                              // Do not update IOTLB for CDW imp
+           licit accesses
+      546                              // When Stage 2 is disabled and th
+           e GPA (SPA) is an MSI address, IOTLB is not updated yet and
+     ...
+      550                                      else                      
+             cdw_done_o = 1'b1;
+      551                              end
+      552  
+      553 -                            // "(1): If i > 0 and pte.vpn[i − 
+          -1 : 0] != 0, this is a misaligned superpage."                 
+      554 -                            // "     Stop and raise a page-fau
+          -lt exception corresponding to the original access type."      
+      555 -                            // "(2): When a virtual page is ac
+          -cessed and the A bit is clear, or is written and the D bit is 
+          -clear,"                                                       
+      556 -                            // "     a page-fault exception is
+          - raised."                                                     
+      557 -                            // "(3): For G-stage address trans
+          -lation, all memory accesses are considered to be user-level ac
+          -cesses,"                                                      
+      558 -                            // "     as though executed in U-m
+          -ode."                                                         
+      559 -                            if ((main_lvl_q == LVL1 && |pte.pp
+          -n[17:0] != 1'b0   ) ||       // 1G                            
+      560 -                                (main_lvl_q == LVL2 && |pte.pp
+          -n[8:0] != 1'b0    ) ||       // 2M                            
+      561 -                                (!pte.a || !pte.r || (is_store
+          -_i && !pte.d)    ) ||                                         
+      562 -                                (ptw_stage_q != STAGE_1 && !pt
+          -e.u              )) begin                                     
+      563 -                                                              
+      553 +                            // "If i > 0 and pte.vpn[i − 1 : 0
+          +] != 0, this is a misaligned superpage."                      
+      554 +                            // "Stop and raise a page-fault ex
+          +ception corresponding to the original access type."           
+      555 +                            if ((main_lvl_q == LVL1 && |pte.pp
+          +n[17:0] != 1'b0) ||   // 1G misaligned                        
+      556 +                                (main_lvl_q == LVL2 && |pte.pp
+          +n[8:0]  != 1'b0)) begin  // 2M misaligned                     
+      557 +                                                              
+      558                                  pf_excep_n        = 1'b1;
+      565 -                                state_n             = ERROR;  
+      566 -                                ptw_stage_n         = ptw_stag
+          -e_q;                                                          
+      567 -                                update_o            = 1'b0;   
+      568 -                                cdw_done_o          = 1'b0;   
+      559 +                                state_n           = ERROR;    
+      560 +                                ptw_stage_n       = ptw_stage_
+          +q;                                                            
+      561 +                                update_o          = 1'b0;     
+      562 +                                cdw_done_o        = 1'b0;     
+      563                              end
+      564                          end : leaf_pte
+      565                          
+
+⏺ 変更を確認します。
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ 正しく変更されています。変更内容をまとめます。
+
+  ---
+  変更内容まとめ
+
+  変更箇所：leaf_pte ブロック内のフォルト判定（旧 lines 553–569）
+
+  削除した条件（権限チェック）：
+  // 削除
+  (!pte.a || !pte.r || (is_store_i && !pte.d))    // A/D/R ビット
+  (ptw_stage_q != STAGE_1 && !pte.u)              // U ビット（G-stage）
+
+  残した条件（構造的有効性チェック）：
+  // 残す
+  (main_lvl_q == LVL1 && |pte.ppn[17:0] != 1'b0)   // 1G スーパーページ 
+  ミスアライン
+  (main_lvl_q == LVL2 && |pte.ppn[8:0]  != 1'b0)   // 2M スーパーページ 
+  ミスアライン
+
+  変更されなかった他のチェック
+
+  ┌─────────────────────────────────────┬────────┬─────────────────────────┐
+  │              チェック               │  場所  │          変更           │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ !pte.v || (!pte.r && pte.w)         │ line   │ そのまま（PTE           │
+  │                                     │ 459    │ 構造上の無効）          │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ non-leaf PTE の A/D/U ビット        │ line   │ そのまま（仕様上        │
+  │                                     │ 677    │ reserved）              │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ non-leaf が LVL3 まで到達           │ line   │ そのまま                │
+  │                                     │ 686    │                         │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ pte.reserved 非ゼロ                 │ line   │ そのまま                │
+  │                                     │ 696    │                         │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ Stage-1 で pte.ppn                  │ line   │ そのまま                │
+  │ 上位ビットオーバーフロー            │ 706    │                         │
+  ├─────────────────────────────────────┼────────┼─────────────────────────┤
+  │ AXI エラー → PT_DATA_CORRUPTION     │ line   │ そのまま                │
+  │                                     │ 723    │                         │
+  └─────────────────────────────────────┴────────┴─────────────────────────┘
+
+  動作の変化
+
+  - 変更前： A=0, D=0 (ストア時), R=0, U=0 (G-stage) のいずれかが成立すると
+  ERROR → FQ に記録
+  - 変更後： これらの条件は無視し、有効な LEAF PTE として update_o = 1 で IOTLB
+  に登録。スーパーページのミスアラインのみ ERROR になる
+
+✻ Cogitated for 1m 22s
+
+※ recap: Modifying the RISC-V IOMMU PTW module to defer permission checks to the IOTLB hit path. The leaf PTE permission conditions were removed; confirm the change looks correct before proceeding.
+
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coco/trans 
+  lation_logic/ptw/Makefile                                                     
+  このmakefile内のパス関係をマシンに依存しない形に書き換えて。                  
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ このMakefileの位置（tb_coco/translation_logic/ptw/）からリポジトリルート（risc
+  v-iommu-kawano/）は3階層上なので、Makefile自身の位置を起点にした変数を定義して
+  置き換えます。
+
+⏺ Update(Makefile)
+  ⎿  Added 11 lines, removed 6 lines
+       3  # シミュレータを明示的に指定
+       4  SIM = verilator
+       5  
+       6 +# このMakefileが置かれているディレクトリ                       
+       7 +MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST)))) 
+       8 +# リポジトリルート (tb_coco/translation_logic/ptw/ の3階層上)  
+       9 +REPO_ROOT    := $(realpath $(MAKEFILE_DIR)../../..)            
+      10 +                                                               
+      11  # 1. scenarioフォルダ内の test_*.py を全て取得
+      12  SCENARIO_FILES := $(wildcard scenario/test_*.py)
+      13  
+     ...
+      24  # Verilator用のコンパイルオプション
+      25  # ==========================================
+      26  # 1. Includeディレクトリの指定 (-I を使用)
+      22 -EXTRA_ARGS += -I/Users/keipon/Desktop/project/tt_pretraining/ri
+         -scv-iommu-kawano/packages/dependencies                         
+      27 +EXTRA_ARGS += -I$(REPO_ROOT)/packages/dependencies             
+      28  
+      29  # 2. 波形出力(VCD)と、構造体の中身を波形にダンプするオプション
+      30  EXTRA_ARGS += --trace --trace-structs
+     ...
+      36  # コンパイル対象ファイル (順番はパッケージが先！)
+      37  # ==========================================
+      38  VERILOG_SOURCES = \
+      34 -    /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-ka
+         -wano/packages/dependencies/riscv_pkg.sv \                      
+      35 -  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawa
+         -no/packages/dependencies/axi_pkg.sv \                          
+      36 -    /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-ka
+         -wano/packages/rv_iommu/rv_iommu_pkg.sv \                       
+      37 -    /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-ka
+         -wano/rtl/translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv \     
+      38 -    $(PWD)/tb_ptw_wrapper.sv                                   
+      39 +    $(REPO_ROOT)/packages/dependencies/riscv_pkg.sv \          
+      40 +    $(REPO_ROOT)/packages/dependencies/axi_pkg.sv \            
+      41 +    $(REPO_ROOT)/packages/rv_iommu/rv_iommu_pkg.sv \           
+      42 +    $(REPO_ROOT)/rtl/translation_logic/ptw/rv_iommu_ptw_sv39x4_
+         +pc.sv \                                                        
+      43 +    $(MAKEFILE_DIR)/tb_ptw_wrapper.sv                          
+      44  
+      45  TOPLEVEL = tb_ptw_wrapper
+      46  # MODULE = scenario/*
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ 変更内容の説明です。
+
+  変更点
+
+  追加した変数（2つ）：
+
+  MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+  REPO_ROOT    := $(realpath $(MAKEFILE_DIR)../../..)
+
+  - MAKEFILE_DIR：このMakefileが置かれているディレクトリを絶対パスで取得。make
+  をどのディレクトリから呼んでも正しく解決される。
+  - REPO_ROOT：MAKEFILE_DIR から3階層上（tb_coco/translation_logic/ptw/ →
+  riscv-iommu-kawano/）をリポジトリルートとして解決。realpath
+  でシンボリックリンクや .. を展開する。
+
+  置き換えたパス：
+
+  ┌──────────────────────────────────────┬──────────────────────────────────┐
+  │                変更前                │              変更後              │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ /Users/keipon/.../packages/dependenc │ $(REPO_ROOT)/packages/dependenci │
+  │ ies                                  │ es                               │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ /Users/keipon/.../packages/rv_iommu/ │ $(REPO_ROOT)/packages/rv_iommu/r │
+  │ rv_iommu_pkg.sv                      │ v_iommu_pkg.sv                   │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ /Users/keipon/.../rtl/.../rv_iommu_p │ $(REPO_ROOT)/rtl/.../rv_iommu_pt │
+  │ tw_sv39x4_pc.sv                      │ w_sv39x4_pc.sv                   │
+  ├──────────────────────────────────────┼──────────────────────────────────┤
+  │ $(PWD)/tb_ptw_wrapper.sv             │ $(MAKEFILE_DIR)/tb_ptw_wrapper.s │
+  │                                      │ v                                │
+  └──────────────────────────────────────┴──────────────────────────────────┘
+
+  $(PWD) は make を呼び出したディレクトリに依存するため、$(MAKEFILE_DIR)
+  に変えることでサブディレクトリや CI 環境から呼んだ場合でも正しく動作します。
+
+✻ Brewed for 37s
+
+❯ keipon@Keis-MacBook-Air tb_coco % gmake                                       
+  gmake: *** No targets specified and no makefile found.  Stop.                 
+  keipon@Keis-MacBook-Air tb_coco % cd translation_logic/ptw/                   
+  keipon@Keis-MacBook-Air ptw % gmake                                           
+  gmake: cocotb-config: No such file or directory                               
+  Makefile:48: /Makefile.sim: No such file or directory                         
+  gmake: *** No rule to make target '/Makefile.sim'.  Stop.                     
+
+⏺ cocotb-config がシェルから見つからないのが原因です。環境を確認します。
+
+⏺ Bash(which cocotb-config 2>&1; python3 -m cocotb --version 2>&1; pip3 show
+      cocotb 2>&1 | head -5; ls
+      /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/…)
+  ⎿  cocotb-config not found
+     /opt/homebrew/opt/python@3.14/bin/python3.14: No module named cocotb
+     WARNING: Package(s) not found: cocotb
+     … +13 lines (ctrl+o to expand)
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ cocotb-config は tb_coco/venv/ の中にあります。Makefile
+  からの相対パスで参照するよう修正します。
+
+⏺ Update(Makefile)
+  ⎿  Added 2 lines
+       7  MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+       8  # リポジトリルート (tb_coco/translation_logic/ptw/ の3階層上)
+       9  REPO_ROOT    := $(realpath $(MAKEFILE_DIR)../../..)
+      10 +# cocotb venv (tb_coco/venv/ — Makefileの2階層上)              
+      11 +VENV_DIR     := $(realpath $(MAKEFILE_DIR)../../venv)          
+      12  
+      13  # 1. scenarioフォルダ内の test_*.py を全て取得
+      14  SCENARIO_FILES := $(wildcard scenario/test_*.py)
+
+⏺ Update(Makefile)
+  ⎿  Added 1 line, removed 1 line
+      47  TOPLEVEL = tb_ptw_wrapper
+      48  # MODULE = scenario/*
+      49  
+      50 -include $(shell cocotb-config --makefiles)/Makefile.sim        
+      50   No newline at end of file
+      51 +include $(shell $(VENV_DIR)/bin/cocotb-config --makefiles)/Make
+         +file.sim                                                       
+      52   No newline at end of file
+
+⏺ 確認します。
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ これで ! gmake を試してみてください。
+
+  変更内容は1点です：
+
+  # 追加
+  VENV_DIR := $(realpath $(MAKEFILE_DIR)../../venv)
+
+  # 変更
+  include $(shell $(VENV_DIR)/bin/cocotb-config --makefiles)/Makefile.sim
+
+  tb_coco/venv/ は
+  MAKEFILE_DIR（tb_coco/translation_logic/ptw/）から2階層上なので、venv
+  をアクティベートしなくても cocotb-config をフルパスで呼び出せます。venv
+  が同じ相対位置にある環境なら誰でも動きます。
+
+✻ Crunched for 41s
+
+❯ keipon@Keis-MacBook-Air ptw % gmake                                           
+  /opt/homebrew/opt/python@3.14/bin/python3.14: Error while finding module      
+  specification for 'cocotb_tools.config' (ModuleNotFoundError: No module named 
+   'cocotb_tools')                                                              
+  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb/venv/lib/p 
+  ython3.12/site-packages/cocotb_tools/makefiles/Makefile.sim:93: *** Couldn't  
+  find makefile for simulator: "verilator"! Available simulators: .  Stop.      
+
+⏺ 2つのエラーがあります。まず環境を詳しく確認します。
+⏺ Bash(head -3 /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/t
+      b_coco/venv/bin/cocotb-config; echo "---";
+      /Users/keipon/Desktop/project/tt_pretraining…)
+  ⎿  #!/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb/v
+     env/bin/python3.12
+     import sys
+     … +9 lines (ctrl+o to expand)
+
+⏺ 問題が2つあることが判明しました：
+  1. tb_coco/venv/bin/cocotb-config のシェバンが tb/venv/bin/python3.12
+  を指しており（古い python 参照）、直接実行できない
+  2. python3 -m cocotb_tools.config --makefiles は正常に動く → こちらを使うべき
+
+  tb_coco/venv の makefiles に verilator サポートがあるか確認します。
+
+  Listed 2 directories (ctrl+o to expand)
+
+⏺ Makefile.verilator は tb_coco/venv に存在しています。tb/venv
+  の古いパスのシェバンが原因で間違った venv の makefiles が使われていました。
+
+  cocotb-config の代わりに python3 -m cocotb_tools.config
+  を直接呼ぶよう修正します。
+
+⏺ Update(Makefile)
+  ⎿  Added 1 line, removed 1 line
+      47  TOPLEVEL = tb_ptw_wrapper
+      48  # MODULE = scenario/*
+      49  
+      50 -include $(shell $(VENV_DIR)/bin/cocotb-config --makefiles)/Make
+         -file.sim                                                       
+      50   No newline at end of file
+      51 +include $(shell $(VENV_DIR)/bin/python3 -m cocotb_tools.config 
+         +--makefiles)/Makefile.sim                                      
+      52   No newline at end of file
+
+⏺ ! gmake で再試行してください。
+
+  ---
+  原因まとめ：
+
+  tb_coco/venv/bin/cocotb-config のシェバン1行目が #!/.../tb/venv/bin/python3.12
+   という別の venv のパスを指していたため、システムの Python 3.14（tb/venv の
+  python3.12 シンボリックリンクが壊れている）で実行されて cocotb_tools
+  が見つからず失敗していました。その結果 $(shell ...)
+  が誤ったパスを返し、verilator のない tb/venv の Makefile.sim
+  がインクルードされていました。
+
+  python3 -m cocotb_tools.config はシェバンに依存せず venv の python
+  を直接使うため、この問題を回避できます。
+
+✻ Brewed for 1m 44s
+
+❯ (venv) keipon@Keis-MacBook-Air ptw % gmake                                    
+  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coco/trans 
+  lation_logic/ptw/venv/bin/python3: Error while finding module specification   
+  for 'cocotb_tools.config' (ModuleNotFoundError: No module named               
+  'cocotb_tools')                                                               
+  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coco/venv/ 
+  lib/python3.12/site-packages/cocotb_tools/makefiles/Makefile.sim:93: ***      
+  Couldn't find makefile for simulator: "verilator"! Available simulators: .    
+  Stop.                                                                         
+  (venv) keipon@Keis-MacBook-Air ptw %                                          
+  venvを新しく作成した。必要なツールがインストールされていないかも              
+
+⏺ まず現状のディレクトリ構造と venv の状態を確認します。
+
+⏺ Bash(ls /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coc
+      o/translation_logic/ptw/; echo "---"; ls
+      /Users/keipon/Desktop/project/tt_pretraining/r…)
+  ⎿  __pycache__
+     dump.vcd
+     Makefile
+     … +15 lines (ctrl+o to expand)
+
+⏺ ptw/venv が Python 3.14 で、なぜ VENV_DIR がそこを指しているか調べます。
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ Bash(cd /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coc
+      o/translation_logic/ptw && gmake -n 2>&1 | head -5; echo "VENV_DIR
+      check:"; gmake -p 2>…)
+  ⎿  /opt/homebrew/opt/python@3.14/bin/python3.14: Error while finding modu
+     le specification for 'cocotb_tools.config' (ModuleNotFoundError: No mo
+     dule named 'cocotb_tools')
+     … +7 lines (ctrl+o to expand)
+
+⏺ VENV_DIR は正しく tb_coco/venv を指しています。では tb_coco/venv/bin/python3
+  自体を確認します。
+
+⏺ Bash(ls -la /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb
+      _coco/venv/bin/python* ; echo "---";
+      /Users/keipon/Desktop/project/tt_pretraining/riscv…)
+  ⎿  -rwxr-xr-x@ 1 keipon  staff  52640 Apr 22 11:29 /Users/keipon/Desktop/
+     project/tt_pretraining/riscv-iommu-kawano/tb_coco/venv/bin/python
+     -rwxr-xr-x@ 1 keipon  staff  52640 Apr 22 11:29 /Users/keipon/Desktop/
+     … +8 lines (ctrl+o to expand)
+
+⏺ tb_coco/venv/bin/python3 が uv 製のランチャーで、VIRTUAL_ENV が ptw/venv
+  にセットされているときに ptw の Python
+  を使ってしまっていると思われます。Makefile.sim の verilator
+  エラーも確認します。
+
+⏺ Bash(file /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_c
+      oco/venv/bin/python3; echo "---"; which uv 2>&1; echo "---"; sed -n
+      '88,100p' /Users/ke…)
+  ⎿  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb_coc
+     o/venv/bin/python3: Mach-O 64-bit executable arm64
+     ---
+     … +14 lines (ctrl+o to expand)
+
+  Searched for 3 patterns (ctrl+o to expand)
+
+⏺ 原因がわかりました。Makefile.sim の内部で PATH から cocotb-config を探して
+  PYTHON_BIN を決めており（line 62-66）、PATH に cocotb-config がないので
+  python3 にフォールバックしてシステムの Python 3.14 が使われています。
+
+  修正方針： VENV_DIR/bin を PATH に追加してから include する。これで
+  Makefile.sim が cocotb-config を正しく見つけます。
+
+⏺ Update(Makefile)
+  ⎿  Added 2 lines
+       9  REPO_ROOT    := $(realpath $(MAKEFILE_DIR)../../..)
+      10  # cocotb venv (tb_coco/venv/ — Makefileの2階層上)
+      11  VENV_DIR     := $(realpath $(MAKEFILE_DIR)../../venv)
+      12 +# venv/bin を PATH に追加して cocotb-config を Makefile.sim か 
+         +ら見つけられるようにする                                       
+      13 +export PATH  := $(VENV_DIR)/bin:$(PATH)                        
+      14  
+      15  # 1. scenarioフォルダ内の test_*.py を全て取得
+      16  SCENARIO_FILES := $(wildcard scenario/test_*.py)
+
+⏺ さらに、include 行も cocotb-config でなく PATH
+  経由で動くようになるので、シンプルに戻せます。
+
+⏺ Update(Makefile)
+  ⎿  Added 1 line, removed 1 line
+      49  TOPLEVEL = tb_ptw_wrapper
+      50  # MODULE = scenario/*
+      51  
+      52 -include $(shell $(VENV_DIR)/bin/python3 -m cocotb_tools.config 
+         ---makefiles)/Makefile.sim                                      
+      52   No newline at end of file
+      53 +include $(shell cocotb-config --makefiles)/Makefile.sim        
+      54   No newline at end of file
+
+⏺ 最終形を確認します。
+  Read 1 file (ctrl+o to expand)
+
+⏺ ! gmake で再試行してください。
+
+  ---
+  根本原因のまとめ：
+
+  Makefile.sim の内部ロジック（line 62-66）が PATH から cocotb-config 
+  --python-bin を呼んで PYTHON_BIN を決めています。cocotb-config が PATH
+  になければ python3（= システムの Python 3.14）にフォールバックし、cocotb_tools
+   が見つからず COCOTB_MAKEFILES_DIR が空になり、verilator の Makefile
+  が見つからないというエラーになっていました。
+
+  export PATH := $(VENV_DIR)/bin:$(PATH) で tb_coco/venv/bin を PATH
+  の先頭に追加することで、Makefile.sim が cocotb-config を正しく見つけ、Python
+  3.12 の cocotb が使われるようになります。
+
+✻ Baked for 5m 25s
+
+※ recap: Fixing a cocotb Makefile to be machine-independent. The last change adds the venv bin dir to PATH so Makefile.sim finds cocotb-config correctly. Next: user runs gmake to verify it works.
+
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/rtl/translati 
+  on_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv                                        
+  このモジュールでリーフのPTEの権限チェックの機能は削除したはずなのに、         
+  /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb/translatio 
+  n_logic/ptw/scenario/test_s1_invalid.py                                       
+  このテストをとおすとチーフの権限チェックまでやっているように見える。          
+  ストア命令のリクエストでリーフのPTEのDビットが０の場合正しくフォルトを検出す  
+  るか確かめるテストを合格してしまっている                                      
+
+⏺ テストファイルとラッパーモジュールを同時に確認します。
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ test_s1_fault_leaf_d_0_store が通ってしまっている原因を特定するため、tb/
+  のテストベンチ構成と ptw_helpers.py を確認します。
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+⏺ tb_ptw_wrapper.sv の中で追加チェックが行われていないか確認します。
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ sim_build が古いビルドのままの可能性があります。タイムスタンプを確認します。
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ 原因は sim_build が古い です。
+
+  ┌────────────────────────────────────────────────┬────────────────┐
+  │                    ファイル                    │ タイムスタンプ │
+  ├────────────────────────────────────────────────┼────────────────┤
+  │ sim_build/ (コンパイル済みバイナリ)            │ Apr 21 11:33   │
+  ├────────────────────────────────────────────────┼────────────────┤
+  │ rv_iommu_ptw_sv39x4_pc.sv (権限チェック削除後) │ Apr 22 11:07   │
+  └────────────────────────────────────────────────┴────────────────┘
+
+  RTL 変更後に再ビルドされていないため、削除前の権限チェックが入ったバイナリで테
+  스트が動いています。
+
+  sim_build を削除して再ビルドすれば、意図通りの動作になります。
+
+  rm -rf sim_build/
+  gmake
+
+  再ビルド後の挙動予測：
+
+  ┌──────────────────────────────┬────────────┬─────────────────────────────┐
+  │            テスト            │ 再ビルド後 │            理由             │
+  ├──────────────────────────────┼────────────┼─────────────────────────────┤
+  │ test_s1_fault_leaf_d_0_store │ FAIL       │ D ビットチェックを PTW      │
+  │                              │            │ から削除したため            │
+  ├──────────────────────────────┼────────────┼─────────────────────────────┤
+  │ test_s1_fault_leaf_a_0       │ FAIL       │ A ビットチェックも削除済み  │
+  ├──────────────────────────────┼────────────┼─────────────────────────────┤
+  │ test_s1_fault_leaf_r_0       │ FAIL       │ R ビットチェックも削除済み  │
+  ├──────────────────────────────┼────────────┼─────────────────────────────┤
+  │ test_s1_fault_invalid_pte    │ PASS       │ !pte.v や reserved          │
+  │ など                         │            │ チェックは残っているため    │
+  └──────────────────────────────┴────────────┴─────────────────────────────┘
+
+  LEAF_A_0 / LEAF_R_0 / LEAF_D_0_STORE / LEAF_W_0_STORE の4テストは設計変更で意
+  図的に削除したチェックを試しているので、今後これらは「PTW を直接テストする層で
+  は期待通りにフォルトを返さない」という前提でテストコード自体を修正するか、アク
+  セス権限チェックをするラッパー層のテストに移す必要があります。
+
+✻ Churned for 2m 23s
+
+❯ makefileにclean機能を追加してくれる？                                         
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ cocotb の Makefile.sim が clean を定義しているか確認してから追加します。
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+⏺ cocotb は clean:: (二重コロン) で定義しているので、こちらも clean::
+  を追加すれば両方が実行されます。cocotb 側がすでに sim_build/ と results.xml
+  を消すので、残りの dump.vcd と __pycache__ を追加します。
+
+  両 Makefile に追記します。
+
+⏺ Update(Makefile)
+  ⎿  Added 5 lines
+      49  TOPLEVEL = tb_ptw_wrapper
+      50  # MODULE = scenario/*
+      51  
+      52 +# cocotb の clean:: に追記する形で波形・キャッシュも削除       
+      53 +clean::                                                        
+      54 +  @$(RM) -f  $(MAKEFILE_DIR)/dump.vcd                          
+      55 +  @$(RM) -rf $(MAKEFILE_DIR)/__pycache__ $(MAKEFILE_DIR)/scenar
+         +io/__pycache__                                                 
+      56 +                                                               
+      57  include $(shell cocotb-config --makefiles)/Makefile.sim
+      58   No newline at end of file
+
+⏺ Update(~/Desktop/project/tt_pretraining/riscv-iommu-kawano/tb/translation_logi
+        c/ptw/Makefile)
+  ⎿  Added 5 lines
+      40  TOPLEVEL = tb_ptw_wrapper
+      41  # MODULE = scenario/*
+      42  
+      43 +# cocotb の clean:: に追記する形で波形・キャッシュも削除       
+      44 +clean::                                                        
+      45 +  @$(RM) -f  dump.vcd                                          
+      46 +  @$(RM) -rf __pycache__ scenario/__pycache__                  
+      47 +                                                               
+      48  include $(shell cocotb-config --makefiles)/Makefile.sim
+      49   No newline at end of file
+
+⏺ これで gmake clean を実行すると以下がすべて削除されます。
+
+  ┌─────────────────────────────────────┬──────────────────────┐
+  │              削除対象               │         担当         │
+  ├─────────────────────────────────────┼──────────────────────┤
+  │ sim_build/                          │ cocotb の clean::    │
+  ├─────────────────────────────────────┼──────────────────────┤
+  │ results.xml                         │ cocotb の clean::    │
+  ├─────────────────────────────────────┼──────────────────────┤
+  │ dump.vcd                            │ 今回追加した clean:: │
+  ├─────────────────────────────────────┼──────────────────────┤
+  │ __pycache__/, scenario/__pycache__/ │ 今回追加した clean:: │
+  └─────────────────────────────────────┴──────────────────────┘
+
+  :: (二重コロン) を使っているので cocotb
+  側の定義を上書きせず、両方のレシピが順番に実行されます。
+
+✻ Cogitated for 56s
+
+❯ gmakeしても異ミュレーションが実行されなくなってしまった                       
+
+⏺ clean:: がインクルードより前にあるため、Makefile
+  の最初のターゲットになってしまい、gmake だけで clean が走っています。clean::
+  を include の後ろに移動すれば解決します。
+
+⏺ Update(Makefile)
+  ⎿  Added 3 lines, removed 3 lines
+      49  TOPLEVEL = tb_ptw_wrapper
+      50  # MODULE = scenario/*
+      51  
+      52 +include $(shell cocotb-config --makefiles)/Makefile.sim        
+      53 +                                                               
+      54  # cocotb の clean:: に追記する形で波形・キャッシュも削除
+      55  clean::
+      56    @$(RM) -f  $(MAKEFILE_DIR)/dump.vcd
+      55 -  @$(RM) -rf $(MAKEFILE_DIR)/__pycache__ $(MAKEFILE_DIR)/scenar
+         -io/__pycache__                                                 
+      56 -                                                               
+      57 -include $(shell cocotb-config --makefiles)/Makefile.sim        
+      57   No newline at end of file
+      58 +  @$(RM) -rf $(MAKEFILE_DIR)/__pycache__ $(MAKEFILE_DIR)/scenar
+         +io/__pycache__                                                 
+      59   No newline at end of file
+  ⎿  You've hit your limit · resets 2pm (Asia/Tokyo)
+     /upgrade or /extra-usage to finish what you’re working on.
+❯ /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/rtl/translati 
+  on_logic/rv_iommu_iotlb_sv39x4.sv                                             
+                                                                                
+  このIOTLBの入出力の役割とその生成元、PTEの登録の仕方、ヒット・ミスの判定ロジ  
+  ック、権限チェックの判定ロジック、アーキテクチャをまとめて欲しい。            
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ 権限チェックの参照先であるラッパーと、rv_iommu::is_trans_1G
+  などのパッケージ関数も確認します。
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(sed -n '960,1010p' /Users/keipon/Desktop/project/tt_pretraining/riscv-iom
+      mu-kawano/rtl/translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.sv)
+  ⎿              //# IOTLB Lookup & Hit
+                 if (iotlb_lu_hit) begin
+     … +40 lines (ctrl+o to expand)
+
+⏺ Bash(sed -n '451,500p' /Users/keipon/Desktop/project/tt_pretraining/riscv-iomm
+      u-kawano/packages/rv_iommu/rv_iommu_pkg.sv)
+  ⎿      function automatic logic is_trans_1G(input logic S1_en, input logi
+     c S2_en,
+                                             input logic is_1S_1G, input lo
+     … +31 lines (ctrl+o to expand)
+
+⏺ 全体を把握しました。まとめます。
+
+  ---
+  IOTLB (rv_iommu_iotlb_sv39x4) アーキテクチャ解析
+
+  ---
+  1. 入出力ポートの役割と生成元
+
+  Lookup ポート（組み合わせ、毎サイクル）
+
+  ┌──────────────┬─────┬───────────────────────┬────────────────────────────┐
+  │     信号     │ 方  │         役割          │           生成元           │
+  │              │ 向  │                       │                            │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lookup_i     │ in  │ ルックアップ有効フラ  │ wrapper（トランザクション  │
+  │              │     │ グ                    │ 受付時）                   │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_iova_i    │ in  │ 検索するIOVA（64-bit  │ デバイスからのアドレス     │
+  │              │     │ ）                    │                            │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_pscid_i   │ in  │ プロセスアドレス空間I │ DC/PC から取得した PSCID   │
+  │              │     │ D                     │                            │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_gscid_i   │ in  │ 仮想マシンID          │ DC から取得した GSCID      │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ en_1S_i      │ in  │ ステージ1有効フラグ   │ DC/PC の設定値             │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ en_2S_i      │ in  │ ステージ2有効フラグ   │ DC の設定値                │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_hit_o     │ out │ ヒット信号            │ 本モジュール内で生成       │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_miss_o    │ out │ ミス信号              │ 本モジュール内で生成       │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_1S_conten │ out │ S1 PTE（GPA の PPN    │ ヒットしたエントリの       │
+  │ t_o          │     │ を含む）              │ pte_1S                     │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_2S_conten │ out │ S2 PTE（SPA の PPN    │ ヒットしたエントリの       │
+  │ t_o          │     │ を含む）              │ pte_2S                     │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_1S_2M_o / │ out │ S1 スーパーページサイ │ ヒットしたエントリのタグ   │
+  │  lu_1S_1G_o  │     │ ズフラグ              │                            │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_2S_2M_o / │ out │ S2 スーパーページサイ │ ヒットしたエントリのタグ   │
+  │  lu_2S_1G_o  │     │ ズフラグ              │                            │
+  ├──────────────┼─────┼───────────────────────┼────────────────────────────┤
+  │ lu_is_msi_o  │ out │ MSI アドレスエントリ  │ ヒットしたエントリのタグ   │
+  │              │     │ フラグ                │                            │
+  └──────────────┴─────┴───────────────────────┴────────────────────────────┘
+
+  Update ポート（PTW 完了時に1サイクルパルス）
+
+  ┌─────────────────┬──────┬────────────────┬────────────────────────────────┐
+  │      信号       │ 方向 │      役割      │             生成元             │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ update_i        │ in   │ 登録トリガー   │ PTW の update_o                │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_vpn_i        │ in   │ 登録する       │ PTW の iova_q[SVX-1:12]        │
+  │                 │      │ VPN（29-bit）  │                                │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_pscid_i /    │ in   │ ID 情報        │ PTW                            │
+  │ up_gscid_i      │      │                │ がリクエスト開始時に保存した値 │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_1S_content_i │      │                │ PTW が最終リーフで取得した     │
+  │  /              │ in   │ S1/S2 PTE 内容 │ PTE（global ビット合成済み）   │
+  │ up_2S_content_i │      │                │                                │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_1S_2M_i /    │ in   │ S1             │ PTW の s1_lvl_q から生成       │
+  │ up_1S_1G_i      │      │ ページサイズ   │                                │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_2S_2M_i /    │ in   │ S2             │ PTW の main_lvl_q から生成     │
+  │ up_2S_1G_i      │      │ ページサイズ   │                                │
+  ├─────────────────┼──────┼────────────────┼────────────────────────────────┤
+  │ up_is_msi_i     │ in   │ MSI            │ wrapper の MSI 判定ロジック    │
+  │                 │      │ アドレスフラグ │                                │
+  └─────────────────┴──────┴────────────────┴────────────────────────────────┘
+
+  Flush ポート（IOTINVAL コマンド受信時）
+
+  ┌─────────────────────────────────┬───────────────────────────────────────┐
+  │              信号               │                 役割                  │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ flush_vma_i                     │ IOTINVAL.VMA コマンド（S1             │
+  │                                 │ エントリ無効化）                      │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ flush_gvma_i                    │ IOTINVAL.GVMA コマンド（S2            │
+  │                                 │ エントリ無効化）                      │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ flush_av_i / flush_gv_i /       │ ADDR / GSCID / PSCID の有効フラグ     │
+  │ flush_pscv_i                    │                                       │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ flush_vpn_i                     │ 無効化するアドレス（VPN または GPA）  │
+  ├─────────────────────────────────┼───────────────────────────────────────┤
+  │ flush_gscid_i / flush_pscid_i   │ 無効化する VM/プロセス ID             │
+  └─────────────────────────────────┴───────────────────────────────────────┘
+
+  ---
+  2. エントリ構造
+
+  1エントリ = タグ + コンテント の2構造体。
+
+  tags_q[i]:
+    pscid   [19:0]       ← プロセス空間 ID
+    gscid   [15:0]       ← 仮想マシン ID
+    vpn2    [GPPN2:0]    ← 11-bit (Sv39x4 拡張)
+    vpn1    [8:0]
+    vpn0    [8:0]
+    is_1S_2M / is_1S_1G  ← S1 スーパーページ種別
+    is_2S_2M / is_2S_1G  ← S2 スーパーページ種別
+    is_msi               ← MSI エントリ
+    en_1S / en_2S        ← 登録時のステージ有効状態
+    valid
+
+  content_q[i]:
+    pte_1S  (riscv::pte_t)  ← S1 リーフ PTE（ppn = GPA の PPN）
+    pte_2S  (riscv::pte_t)  ← S2 リーフ PTE（ppn = SPA の PPN）
+
+  S1・S2 の PTE
+  が1エントリに同居するため、2ステージ翻訳を1回のルックアップで完結できる。
+
+  ---
+  3. PTE 登録の仕方
+
+  条件: update_i && replace_en[i] && (S1有効→S1_PTE.v || S2有効→S2_PTE.v)
+
+  登録対象スロット i は後述の PLRU
+  で決定される。タグとコンテントを同時に書き込む。
+
+  tags_n[i] = '{
+      pscid:    up_pscid_i,
+      gscid:    up_gscid_i,
+      vpn2/1/0: up_vpn_i の各フィールド,
+      en_1S:    en_1S_i,  en_2S:    en_2S_i,
+      is_1S_1G: up_1S_1G_i, ...
+      valid:    1'b1
+  };
+  content_n[i].pte_1S = up_1S_content_i;
+  content_n[i].pte_2S = up_2S_content_i;
+
+  ---
+  4. ヒット・ミス判定ロジック
+
+  全エントリを並列に比較する（組み合わせ回路）。
+
+  ヒット条件（全て AND）:
+    ① valid == 1
+    ② PSCID 一致   : (lu_pscid == pscid || pte_1S.g) && en_1S_i  ||  !en_1S_i
+    ③ GSCID 一致   : (lu_gscid == gscid && en_2S_i)              ||  !en_2S_i
+    ④ ステージ一致 : en_1S_i == tag.en_1S && en_2S_i == tag.en_2S
+    ⑤ VPN2 一致    : vpn2 == tag.vpn2 & mask_pn2
+                     ※ mask_pn2: 1S有効→9-bit (Sv39), 2Sのみ→11-bit (Sv39x4)
+    ⑥ ページサイズ別 VPN 比較:
+         1G: ① VPN2 のみ一致 (VPN1/VPN0 は offset 扱い)
+         2M: ① VPN2 + VPN1 一致 (VPN0 は offset 扱い)
+         4K: ① VPN2 + VPN1 + VPN0 全一致
+
+  is_trans_1G / is_trans_2M
+  はステージの組み合わせを考慮してページサイズを判定する：
+
+  is_trans_1G = ((is_1S_1G && S1_en) || !S1_en) && ((is_2S_1G && S2_en) ||
+  !S2_en)
+    → 有効な全ステージが 1G の場合のみ 1G 扱い
+
+  is_trans_2M = S1+S2 両有効時:
+                 (is_1S_2M && (is_2S_1G||is_2S_2M)) || (is_2S_2M &&
+  (is_1S_1G||is_1S_2M))
+               それ以外: (is_1S_2M && S1_en) || (is_2S_2M && S2_en)
+
+  ---
+  5. 権限チェックの判定ロジック
+
+  IOTLB 内には権限チェックなし。ヒット時に PTE
+  をそのまま出力し、チェックは上位の wrapper (rv_iommu_tw_sv39x4_pc.sv) で行う。
+
+  IOTLB ヒット後の wrapper での判定:
+
+  【S1 権限チェック (lu_1S_content_o に対して)】
+    ストア && !pte_1S.w  → STORE_PAGE_FAULT
+    is_rx  && !pte_1S.x  → LOAD_PAGE_FAULT
+    U-mode && !pte_1S.u  → LOAD/STORE_PAGE_FAULT
+    S-mode && pte_1S.u && (!SUM || pte_1S.x) → LOAD/STORE_PAGE_FAULT
+
+  【S2 権限チェック (lu_2S_content_o に対して)】
+    ストア && !pte_2S.w  → STORE_GUEST_PAGE_FAULT
+    is_rx  && !pte_2S.x  → LOAD_GUEST_PAGE_FAULT
+
+  ---
+  6. 無効化（Flush）ロジック
+
+  IOTINVAL.VMA（S1 エントリ対象）
+
+  {flush_gv_i, flush_av_i, flush_pscv_i} の 8 パターンで対象を絞り込む。
+
+  ┌────────────┬────────────────────────────────────────┐
+  │ GV|AV|PSCV │               無効化対象               │
+  ├────────────┼────────────────────────────────────────┤
+  │ 000        │ 全ホスト空間エントリ（2S無効・1S有効） │
+  ├────────────┼────────────────────────────────────────┤
+  │ 001        │ PSCID 一致（G=1 除外）                 │
+  ├────────────┼────────────────────────────────────────┤
+  │ 010        │ IOVA 一致（G=1 含む）                  │
+  ├────────────┼────────────────────────────────────────┤
+  │ 011        │ IOVA + PSCID 一致（G=1 除外）          │
+  ├────────────┼────────────────────────────────────────┤
+  │ 100        │ GSCID 一致（2S+1S 両有効）             │
+  ├────────────┼────────────────────────────────────────┤
+  │ 101        │ GSCID + PSCID 一致（G=1 除外）         │
+  ├────────────┼────────────────────────────────────────┤
+  │ 110        │ GSCID + IOVA(GVA) 一致                 │
+  ├────────────┼────────────────────────────────────────┤
+  │ 111        │ GSCID + PSCID + IOVA 一致（G=1 除外）  │
+  └────────────┴────────────────────────────────────────┘
+
+  IOTINVAL.GVMA（S2 エントリ対象）
+
+  {flush_gv_i, flush_av_i} の 3 パターン。
+
+  ┌───────┬─────────────────────────┐
+  │ GV|AV │       無効化対象        │
+  ├───────┼─────────────────────────┤
+  │ 0x    │ 全 S2 有効エントリ      │
+  ├───────┼─────────────────────────┤
+  │ 10    │ GSCID 一致              │
+  ├───────┼─────────────────────────┤
+  │ 11    │ GSCID + GPA（ADDR）一致 │
+  └───────┴─────────────────────────┘
+
+  GVMA の GPA 一致判定は、タグに GPA を直接持たないため make_gppn() で
+  pte_1S.ppn とタグの VPN からエントリの GPA
+  を再構築して比較する（ハードウェアコストあり、仕様通りの実装）。
+
+  ---
+  7. 置換アルゴリズム（PLRU）
+
+  Pseudo Least Recently Used（疑似 LRU） をバイナリツリーで実装。
+
+  エントリ数 N に対して 2*(N-1) ビットのツリーノードを持つ。
+
+           0          ← root
+          / \
+         1   2
+        / \ / \
+       3  4 5  6      ← (N=8 の例)
+
+  - ヒット時：ヒットしたエントリへのパスを「最近使用」方向にビット更新
+  - 置換選択時：ツリーを root
+  から葉に向かってたどり、「最も使われていない」エントリを replace_en でアサート
+
+  ---
+  全体データフロー図
+
+  デバイスリクエスト (IOVA)
+      │
+      ▼
+  ┌──────────────────────────────────┐
+  │  IOTLB (rv_iommu_iotlb_sv39x4)  │
+  │                                  │
+  │  lookup: IOVA × PSCID × GSCID   │
+  │  → 全エントリ並列比較            │
+  │  → HIT: pte_1S, pte_2S を出力   │
+  │  → MISS: lu_miss_o アサート      │
+  └────────────┬─────────────────────┘
+               │ HIT                  │ MISS
+               ▼                      ▼
+        wrapper で権限チェック     PTW がページテーブルウォーク
+        W/X/U ビット検証           → update_i で IOTLB に登録
+        ↓ OK                       （PLRU により置換先決定）
+        SPA = pte_2S.ppn + offset
+        → trans_valid_o = 1
+
+✻ Cooked for 1m 35s
+
+※ recap: Ready for your next question.

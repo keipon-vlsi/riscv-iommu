@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="223" font-family="ui-monospace, Menlo, monospace">
+<rect width="100%" height="100%" fill="white"/>
+<text x="10" y="20" font-size="13" font-weight="bold" fill="#222">test_04_register_dump</text>
+<text x="160" y="20" font-size="10" fill="#666">1230 ns</text>
+<text x="1260" y="20" font-size="10" fill="#666" text-anchor="end">1740 ns</text>
+<line x1="160" y1="30" x2="1260" y2="30" stroke="#888"/>
+<line x1="311.0" y1="30" x2="311.0" y2="207" stroke="#eee" stroke-width="0.5"/>
+<text x="311.0" y="27" font-size="9" fill="#888" text-anchor="middle">1300</text>
+<line x1="526.7" y1="30" x2="526.7" y2="207" stroke="#eee" stroke-width="0.5"/>
+<text x="526.7" y="27" font-size="9" fill="#888" text-anchor="middle">1400</text>
+<line x1="742.4" y1="30" x2="742.4" y2="207" stroke="#eee" stroke-width="0.5"/>
+<text x="742.4" y="27" font-size="9" fill="#888" text-anchor="middle">1500</text>
+<line x1="958.0" y1="30" x2="958.0" y2="207" stroke="#eee" stroke-width="0.5"/>
+<text x="958.0" y="27" font-size="9" fill="#888" text-anchor="middle">1600</text>
+<line x1="1173.7" y1="30" x2="1173.7" y2="207" stroke="#eee" stroke-width="0.5"/>
+<text x="1173.7" y="27" font-size="9" fill="#888" text-anchor="middle">1700</text>
+<text x="6" y="46.0" font-size="11" font-weight="bold" fill="#666">[prog_ar]</text>
+<line x1="505.1" y1="35.0" x2="505.1" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="505.1" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="634.5" y1="35.0" x2="634.5" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="634.5" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="763.9" y1="35.0" x2="763.9" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="763.9" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="893.3" y1="35.0" x2="893.3" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="893.3" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="1022.8" y1="35.0" x2="1022.8" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="1022.8" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="1152.2" y1="35.0" x2="1152.2" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="1152.2" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="57.0" font-size="11" text-anchor="end" fill="#333">prog_arvalid</text>
+<line x1="160.0" y1="63.0" x2="1260.0" y2="63.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,63.0 505.1,63.0 505.1,43.0 526.7,43.0 526.7,63.0 634.5,63.0 634.5,43.0 656.1,43.0 656.1,63.0 763.9,63.0 763.9,43.0 785.5,43.0 785.5,63.0 893.3,63.0 893.3,43.0 914.9,43.0 914.9,63.0 1022.8,63.0 1022.8,43.0 1044.3,43.0 1044.3,63.0 1152.2,63.0 1152.2,43.0 1173.7,43.0 1173.7,63.0 1260.0,63.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="93.0" font-size="11" text-anchor="end" fill="#333">prog_arready</text>
+<line x1="160.0" y1="99.0" x2="1260.0" y2="99.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,79.0 1260.0,79.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="132.0" font-size="11" font-weight="bold" fill="#666">[prog_r]</text>
+<line x1="160.0" y1="121.0" x2="160.0" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="160.0" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="591.4" y1="121.0" x2="591.4" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="591.4" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="720.8" y1="121.0" x2="720.8" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="720.8" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="850.2" y1="121.0" x2="850.2" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="850.2" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="979.6" y1="121.0" x2="979.6" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="979.6" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="1109.0" y1="121.0" x2="1109.0" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="1109.0" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="1238.4" y1="121.0" x2="1238.4" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="1238.4" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<line x1="1260.0" y1="121.0" x2="1260.0" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="1260.0" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="143.0" font-size="11" text-anchor="end" fill="#333">prog_rvalid</text>
+<line x1="160.0" y1="149.0" x2="1260.0" y2="149.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,129.0 160.0,129.0 160.0,149.0 591.4,149.0 591.4,129.0 612.9,129.0 612.9,149.0 720.8,149.0 720.8,129.0 742.4,129.0 742.4,149.0 850.2,149.0 850.2,129.0 871.8,129.0 871.8,149.0 979.6,149.0 979.6,129.0 1001.2,129.0 1001.2,149.0 1109.0,149.0 1109.0,129.0 1130.6,129.0 1130.6,149.0 1238.4,149.0 1238.4,129.0 1260.0,129.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="179.0" font-size="11" text-anchor="end" fill="#333">prog_rready</text>
+<line x1="160.0" y1="185.0" x2="1260.0" y2="185.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,165.0 160.0,165.0 160.0,185.0 397.3,185.0 397.3,165.0 1260.0,165.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+</svg>

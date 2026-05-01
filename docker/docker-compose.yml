@@ -1,0 +1,48 @@
+# =============================================================================
+# docker-compose.yml — riscv-iommu-kawano cocotb env
+#
+# 使い方:
+#   # 初回のみイメージをビルド
+#   docker compose -f docker/docker-compose.yml build
+#
+#   # 対話シェルに入る (cd /workspace で repo が見える)
+#   docker compose -f docker/docker-compose.yml run --rm cocotb
+#
+#   # ワンショットで smoke テスト
+#   docker compose -f docker/docker-compose.yml run --rm cocotb \
+#       bash -c "cd tb_coco/test/_example/iommu_smoke && make smoke"
+#
+#   # 参照モデル (libiommu) をビルドしてゴールデンベクタを生成
+#   docker compose -f docker/docker-compose.yml run --rm cocotb \
+#       bash -c "cd third_party/iommu-reference && make -C libiommu && make -C libtables \
+#                && cd ../../tb_coco/test/reference/gen_vectors && make run"
+# =============================================================================
+
+services:
+  cocotb:
+    image: riscv-iommu-tb:latest
+    build:
+      context: ..                       # repo root を context に
+      dockerfile: docker/Dockerfile
+      args:
+        # ホストの uid/gid を渡してファイル所有者ズレを防ぐ
+        # 違う場合は: docker compose build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
+        USER_UID: "${UID:-1000}"
+        USER_GID: "${GID:-1000}"
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace                   # repo 全体を bind-mount
+      - cocotb-build:/workspace/.cocotb_build   # ビルドキャッシュは named volume に逃がす
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TERM=xterm-256color
+    # X11 forwarding を使いたい人向け (GTKWave など)。Linux ホストのみ。
+    # 不要なら下 4 行をコメントアウト。
+    # network_mode: host
+    # environment:
+    #   - DISPLAY=${DISPLAY}
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix:ro
+
+volumes:
+  cocotb-build:

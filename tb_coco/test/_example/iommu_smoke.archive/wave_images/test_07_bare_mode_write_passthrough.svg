@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="567" font-family="ui-monospace, Menlo, monospace">
+<rect width="100%" height="100%" fill="white"/>
+<text x="10" y="20" font-size="13" font-weight="bold" fill="#222">test_07_bare_mode_write_passthrough</text>
+<text x="160" y="20" font-size="10" fill="#666">2400 ns</text>
+<text x="1260" y="20" font-size="10" fill="#666" text-anchor="end">2840 ns</text>
+<line x1="160" y1="30" x2="1260" y2="30" stroke="#888"/>
+<line x1="410.0" y1="30" x2="410.0" y2="551" stroke="#eee" stroke-width="0.5"/>
+<text x="410.0" y="27" font-size="9" fill="#888" text-anchor="middle">2500</text>
+<line x1="660.0" y1="30" x2="660.0" y2="551" stroke="#eee" stroke-width="0.5"/>
+<text x="660.0" y="27" font-size="9" fill="#888" text-anchor="middle">2600</text>
+<line x1="910.0" y1="30" x2="910.0" y2="551" stroke="#eee" stroke-width="0.5"/>
+<text x="910.0" y="27" font-size="9" fill="#888" text-anchor="middle">2700</text>
+<line x1="1160.0" y1="30" x2="1160.0" y2="551" stroke="#eee" stroke-width="0.5"/>
+<text x="1160.0" y="27" font-size="9" fill="#888" text-anchor="middle">2800</text>
+<text x="6" y="46.0" font-size="11" font-weight="bold" fill="#666">[tr_aw]</text>
+<line x1="910.0" y1="35.0" x2="910.0" y2="107.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="910.0" y="33.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="57.0" font-size="11" text-anchor="end" fill="#333">tr_awvalid</text>
+<line x1="160.0" y1="63.0" x2="1260.0" y2="63.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,63.0 860.0,63.0 860.0,43.0 935.0,43.0 935.0,63.0 1260.0,63.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="93.0" font-size="11" text-anchor="end" fill="#333">tr_awready</text>
+<line x1="160.0" y1="99.0" x2="1260.0" y2="99.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,99.0 910.0,99.0 910.0,79.0 935.0,79.0 935.0,99.0 1260.0,99.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="132.0" font-size="11" font-weight="bold" fill="#666">[tr_w]</text>
+<line x1="935.0" y1="121.0" x2="935.0" y2="193.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="935.0" y="119.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="143.0" font-size="11" text-anchor="end" fill="#333">tr_wvalid</text>
+<line x1="160.0" y1="149.0" x2="1260.0" y2="149.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,149.0 860.0,149.0 860.0,129.0 960.0,129.0 960.0,149.0 1260.0,149.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="179.0" font-size="11" text-anchor="end" fill="#333">tr_wready</text>
+<line x1="160.0" y1="185.0" x2="1260.0" y2="185.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,185.0 935.0,185.0 935.0,165.0 960.0,165.0 960.0,185.0 1260.0,185.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="218.0" font-size="11" font-weight="bold" fill="#666">[tr_b]</text>
+<line x1="985.0" y1="207.0" x2="985.0" y2="279.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="985.0" y="205.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="229.0" font-size="11" text-anchor="end" fill="#333">tr_bvalid</text>
+<line x1="160.0" y1="235.0" x2="1260.0" y2="235.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,235.0 985.0,235.0 985.0,215.0 1010.0,215.0 1010.0,235.0 1260.0,235.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="265.0" font-size="11" text-anchor="end" fill="#333">tr_bready</text>
+<line x1="160.0" y1="271.0" x2="1260.0" y2="271.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,271.0 435.0,271.0 435.0,251.0 1260.0,251.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="304.0" font-size="11" font-weight="bold" fill="#666">[comp_aw]</text>
+<line x1="910.0" y1="293.0" x2="910.0" y2="365.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="910.0" y="291.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="315.0" font-size="11" text-anchor="end" fill="#333">comp_awvalid</text>
+<line x1="160.0" y1="321.0" x2="1260.0" y2="321.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,321.0 910.0,321.0 910.0,301.0 935.0,301.0 935.0,321.0 1260.0,321.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="351.0" font-size="11" text-anchor="end" fill="#333">comp_awready</text>
+<line x1="160.0" y1="357.0" x2="1260.0" y2="357.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,357.0 435.0,357.0 435.0,337.0 1260.0,337.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="390.0" font-size="11" font-weight="bold" fill="#666">[comp_w]</text>
+<line x1="935.0" y1="379.0" x2="935.0" y2="451.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="935.0" y="377.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="401.0" font-size="11" text-anchor="end" fill="#333">comp_wvalid</text>
+<line x1="160.0" y1="407.0" x2="1260.0" y2="407.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,407.0 935.0,407.0 935.0,387.0 960.0,387.0 960.0,407.0 1260.0,407.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="437.0" font-size="11" text-anchor="end" fill="#333">comp_wready</text>
+<line x1="160.0" y1="443.0" x2="1260.0" y2="443.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,443.0 435.0,443.0 435.0,423.0 1260.0,423.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="6" y="476.0" font-size="11" font-weight="bold" fill="#666">[comp_b]</text>
+<line x1="985.0" y1="465.0" x2="985.0" y2="537.0" stroke="#e0a800" stroke-width="1" stroke-dasharray="3,2" opacity="0.7"/>
+<text x="985.0" y="463.0" font-size="11" text-anchor="middle" fill="#e0a800">★</text>
+<text x="152" y="487.0" font-size="11" text-anchor="end" fill="#333">comp_bvalid</text>
+<line x1="160.0" y1="493.0" x2="1260.0" y2="493.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,493.0 985.0,493.0 985.0,473.0 1010.0,473.0 1010.0,493.0 1260.0,493.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+<text x="152" y="523.0" font-size="11" text-anchor="end" fill="#333">comp_bready</text>
+<line x1="160.0" y1="529.0" x2="1260.0" y2="529.0" stroke="#eee" stroke-width="0.5"/>
+<polyline points="160.0,529.0 985.0,529.0 985.0,509.0 1010.0,509.0 1010.0,529.0 1260.0,529.0" stroke="#1a8a1a" fill="none" stroke-width="1.5"/>
+</svg>

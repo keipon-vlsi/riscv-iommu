@@ -120,45 +120,7 @@ If the S operand is not ignored and is 1 and the most significant bit of the ADD
 
 | The Svrsw60t59b extension is implemented if capabilities.Svrsw60t59b (bit 14) is set to 1. |
 |--------------------------------------------------------------------------------------------|
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
-|                                                                                            |
+                                                                           
 
 # <span id="page-106-0"></span>Bibliography
 

@@ -1,787 +1,1066 @@
-# <span id="page-21-0"></span>Chapter 3. Data Structures
+# Chapter 3. Data Structures
 
-A data structure called device-context (DC) is used by the IOMMU to associate a device with an address space and to hold other per-device parameters used by the IOMMU to perform address translations. A radix-tree data structure called device directory table (DDT) that is traversed using the device\_id is used to locate the DC.
+A data structure called device-context (`DC`) is used by the IOMMU to associate a device with an address space and to hold other per-device parameters used by the IOMMU to perform address translations. A radix-tree data structure called device directory table (DDT) that is traversed using the `device_id` is used to locate the `DC`.
 
-The address space used by a device may require second-stage address translation and protection when the control of the device is passed through to a Guest OS. A Guest OS may optionally provide a first-stage page table for translating IOVA used by a device controlled by the Guest OS to a GPA. When the use of a firststage is not required, then it may be effectively disabled by selecting the first-stage address translation scheme to be Bare. The second-stage is used to translate the GPA to a SPA.
+The address space used by a device may require second-stage address translation and protection when the control of the device is passed through to a Guest OS. A Guest OS may optionally provide a first-stage page table for translating IOVA used by a device controlled by the Guest OS to a GPA. When the use of a first-stage is not required, then it may be effectively disabled by selecting the first-stage address translation scheme to be `Bare`. The second-stage is used to translate the GPA to a SPA.
 
-When the control of the device is retained by the hypervisor or Host OS itself then only the first-stage suffices to perform necessary address translations and protections; the second-stage scheme may be effectively disabled for the device by programming the second-stage address translation scheme to be Bare.
+When the control of the device is retained by the hypervisor or Host OS itself then only the first-stage suffices to perform necessary address translations and protections; the second-stage scheme may be effectively disabled for the device by programming the second-stage address translation scheme to be `Bare`.
 
-When second-stage address translation is not Bare, the DC holds the PPN of the root second-stage page table; a guest-soft-context-ID (GSCID), which facilitates invalidation of cached address translations on a per-virtual-machine basis; and the second-stage address translation scheme.
+When second-stage address translation is not Bare, the `DC` holds the PPN of the root second-stage page table; a guest-soft-context-ID (`GSCID`), which facilitates invalidation of cached address translations on a per-virtual-machine basis; and the second-stage address translation scheme.
 
-Some devices support multiple process contexts where each context may be associated with a different process and thus a different virtual address space. The context in such devices may be configured with a process\_id that identifies the address space. When making a memory access, such devices signal the process\_id along with the device\_id to identify the accessed address space. An example of such a device may be a GPU that supports multiple process contexts, where each context is associated with a different user process, such that the GPU may access memory using the virtual address provided by the user process itself. To support selecting an address space associated with the process\_id, the DC holds the PPN of the root Process Directory Table (PDT), a radix-tree data structure, indexed using fields of the process\_id to locate a data structure called the Process Context (PC).
+Some devices support multiple process contexts where each context may be associated with a different process and thus a different virtual address space. The context in such devices may be configured with a `process_id` that identifies the address space. When making a memory access, such devices signal the `process_id` along with the `device_id` to identify the accessed address space. An example of such a device may be a GPU that supports multiple process contexts, where each context is associated with a different user process, such that the GPU may access memory using the virtual address provided by the user process itself. To support selecting an address space associated with the `process_id`, the `DC` holds the PPN of the root Process Directory Table (PDT), a radix-tree data structure, indexed using fields of the `process_id` to locate a data structure called the Process Context (`PC`).
 
-When a PDT is active, the controls for first-stage address translation are held in the (PC).
+When a PDT is active, the controls for first-stage address translation are held in the `PC`.
 
-When a PDT is not active, the controls for first-stage address translation are held in the DC itself.
+When a PDT is not active, the controls for first-stage address translation are held in the `DC` itself.
 
-The first-stage address translation controls include the PPN of the root first-stage page table; a processsoft-context-ID (PSCID), which facilitates invalidation of cached address translations on a per-addressspace basis; and the first-stage address translation scheme.
+The first-stage address translation controls include the PPN of the root first-stage page table; a process-soft-context-ID (`PSCID`), which facilitates invalidation of cached address translations on a per-address-space basis; and the first-stage address translation scheme.
 
 To handle MSIs from a device controlled by a guest OS, an IOMMU must be able to redirect those MSIs to a guest interrupt file in an IMSIC. Because MSIs from devices are simply memory writes, they would naturally be subject to the same address translation that an IOMMU applies to other memory writes. However, the IOMMU architecture may treat MSIs directed to virtual machines specially, in part to simplify software, and in part to allow optional support for memory-resident interrupt files. To support this capability, the architecture adds to the device contexts an MSI address mask and address pattern, used together to identify pages in the guest physical address space that are the destinations of MSIs; and the real physical address of an MSI page table for controlling the translation and/or conversion of MSIs from the device. The IOMMU support for MSIs to virtual machines is specified by the Advanced Interrupt Architecture specification.
 
-The DC further holds controls for the type of transactions that a device is allowed to generate. One example of such a control is whether the device is allowed to use the PCIe defined Address Translation Service (ATS) [\[4\]](#page-106-4).
+The `DC` further holds controls for the type of transactions that a device is allowed to generate. One example of such a control is whether the device is allowed to use the PCIe defined Address Translation Service (ATS).
 
 Two formats of the device-context structure are supported:
 
-- ⚫ Base Format is 32-bytes in size used when the special treatment of MSI as specified in [Section 3.3.3](#page-39-0) is not supported by the IOMMU.
-- ⚫ Extended Format is 64-bytes in size and extends the base format DC with additional fields to translate MSIs as specified in [Section 3.3.3.](#page-39-0)
+- **Base Format** — is 32-bytes in size used when the special treatment of MSI as specified in Section 3.3.3 is not supported by the IOMMU.
+- **Extended Format** — is 64-bytes in size and extends the base format `DC` with additional fields to translate MSIs as specified in Section 3.3.3.
 
-If capabilities.MSI\_FLAT is 1 then the Extended Format is used else the Base Format is used.
+If `capabilities.MSI_FLAT` is 1 then the Extended Format is used else the Base Format is used.
 
-The DDT used to locate the DC may be configured to be a 1, 2, or 3 level radix-tree depending on the maximum width of the device\_id supported. The partitioning of the device\_id to obtain the device directory indexes (DDI) to traverse the DDT radix-tree are as follows:
+The DDT used to locate the `DC` may be configured to be a 1, 2, or 3 level radix-tree depending on the maximum width of the `device_id` supported. The partitioning of the `device_id` to obtain the device directory indexes (DDI) to traverse the DDT radix-tree are as follows:
 
-![](_page_22_Figure_5.jpeg)
+**Figure 7. Base format `device_id` partitioning** (24-bit `device_id`)
 
-*Figure 8. Extended format* device\_id *partitioning*
+| Bits      | Field   |
+| :-------- | :------ |
+| **23:16** | DDI[2]  (8-bit, root index for 3-level DDT) |
+| **15:7**  | DDI[1]  (9-bit, mid index)                   |
+| **6:0**   | DDI[0]  (7-bit, leaf index, 32-byte DC)      |
 
-The PDT may be configured to be a 1, 2, or 3 level radix-tree depending on the maximum width of the process\_id supported by that device. The partitioning of the process\_id to obtain the process directory indices (PDI) to traverse the PDT radix-tree are as follows:
+**Figure 8. Extended format `device_id` partitioning** (24-bit `device_id`)
 
-![](_page_22_Figure_8.jpeg)
+| Bits      | Field   |
+| :-------- | :------ |
+| **23:15** | DDI[2]  (9-bit, root index for 3-level DDT) |
+| **14:6**  | DDI[1]  (9-bit, mid index)                   |
+| **5:0**   | DDI[0]  (6-bit, leaf index, 64-byte DC)      |
 
-*Figure 9.* process\_id *partitioning for PDT radix-tree traversal*
+The PDT may be configured to be a 1, 2, or 3 level radix-tree depending on the maximum width of the `process_id` supported by that device. The partitioning of the `process_id` to obtain the process directory indices (PDI) to traverse the PDT radix-tree are as follows:
 
-![](_page_22_Picture_10.jpeg)
+**Figure 9. `process_id` partitioning for PDT radix-tree traversal** (20-bit `process_id`)
 
-*The* process\_id *partitioning is designed to require a maximum of 4 KiB, a page, of memory for each process directory table. The root of the table when using a 20-bit wide* process\_id *is not fully populated. The option of making the root table occupy 32 KiB was considered but not adopted as these tables are allocated at run time and contiguous memory allocation larger than a page may stress the Guest and hypervisor memory allocators.*
+| Bits      | Field   |
+| :-------- | :------ |
+| **19:17** | PDI[2]  (3-bit, root index for 3-level PDT) |
+| **16:8**  | PDI[1]  (9-bit, mid index)                  |
+| **7:0**   | PDI[0]  (8-bit, leaf index, 16-byte PC)     |
 
-![](_page_22_Picture_12.jpeg)
+> **Notes:**
+> - The `process_id` partitioning is designed to require a maximum of 4 KiB, a page, of memory for each process directory table. The root of the table when using a 20-bit wide `process_id` is not fully populated. The option of making the root table occupy 32 KiB was considered but not adopted as these tables are allocated at run time and contiguous memory allocation larger than a page may stress the Guest and hypervisor memory allocators.
+> - All RISC-V IOMMU implementations are required to support DDT and PDT located in main memory. Supporting data structures in I/O memory is not required but is not prohibited by this specification.
 
-*All RISC-V IOMMU implementations are required to support DDT and PDT located in main memory. Supporting data structures in I/O memory is not required but is not prohibited by this specification.*
+---
 
-# <span id="page-22-0"></span>3.1. Device-Directory-Table (DDT)
+## 3.1. Device-Directory-Table (DDT)
 
-The DDT is a 1, 2, or 3-level radix-tree indexed using the device directory index (DDI) bits of the device\_id to locate a DC.
+The DDT is a 1, 2, or 3-level radix-tree indexed using the device directory index (DDI) bits of the `device_id` to locate a `DC`.
 
-The following diagrams illustrate the DDT radix-tree. The PPN of the root device-directory-table is held in a memory-mapped register called the device-directory-table pointer (ddtp).
+The following diagrams illustrate the DDT radix-tree. The PPN of the root device-directory-table is held in a memory-mapped register called the device-directory-table pointer (`ddtp`).
 
-Each valid non-leaf (NL) entry is 8-bytes in size and holds the PPN of the next device-directory-table.
+Each valid non-leaf (`NL`) entry is 8-bytes in size and holds the PPN of the next device-directory-table.
 
-A valid leaf device-directory-table entry holds the device-context (DC).
+A valid leaf device-directory-table entry holds the device-context (`DC`).
 
-![](_page_23_Picture_4.jpeg)
+### Figure 10 / 11. DDT walk — algorithmic reference
 
-*Figure 10. Three, two and single-level device directory with extended format* DC
+(Replaces the visual figures with an unambiguous pseudocode + lookup table form so that any reader — human or LLM — derives identical addresses. Faithful to spec §3.3.1.)
 
-![](_page_23_Picture_6.jpeg)
+#### DDT walk pseudocode
 
-*Figure 11. Three, two and single-level device directory with base format* DC
+```
+# ===== INPUT =====
+device_id      : 24-bit
+ddtp.PPN       : 44-bit (memory-mapped register)
+ddtp.iommu_mode: {Off, Bare, 1LVL, 2LVL, 3LVL}
 
-#### <span id="page-23-0"></span>3.1.1. Non-leaf DDT entry
+# ===== PARAMETERS =====
+LEVELS = { 1LVL: 1, 2LVL: 2, 3LVL: 3 }[ddtp.iommu_mode]
 
-A valid (V==1) non-leaf DDT entry provides the PPN of the next level DDT.
+if capabilities.MSI_FLAT == 1:
+    format  = "extended"
+    DC_SIZE = 64                                # bytes
+    DDI[0]  = device_id[5:0]                    # 6 bit
+    DDI[1]  = device_id[14:6]                   # 9 bit
+    DDI[2]  = device_id[23:15]                  # 9 bit
+else:
+    format  = "base"
+    DC_SIZE = 32                                # bytes
+    DDI[0]  = device_id[6:0]                    # 7 bit
+    DDI[1]  = device_id[15:7]                   # 9 bit
+    DDI[2]  = device_id[23:16]                  # 8 bit
 
-![](_page_23_Figure_10.jpeg)
+# ===== device_id width check (spec §3.3 step 5) =====
+if LEVELS == 2 and DDI[2] != 0:                 fault(cause=260)  # Transaction type disallowed
+if LEVELS == 1 and (DDI[2] != 0 or DDI[1] != 0): fault(cause=260)
 
-*Figure 12. Non-leaf device-directory-table entry*
+# ===== WALK (spec §3.3.1) =====
+a = ddtp.PPN * 4096                             # current page base address (SPA)
+i = LEVELS - 1
 
-### <span id="page-24-0"></span>3.1.2. Leaf DDT entry
+while i > 0:                                    # non-leaf levels
+    entry_addr = a + DDI[i] * 8
+    ddte       = read_LE_64bit(entry_addr)      # 8-byte non-leaf entry
+    if access_fault(entry_addr):    fault(cause=257)   # DDT entry load access fault
+    if data_corruption(entry_addr): fault(cause=268)   # DDT data corruption
+    if ddte.V == 0:                 fault(cause=258)   # DDT entry not valid
+    if ddte.reserved != 0:          fault(cause=259)   # DDT entry misconfigured
+    a = ddte.PPN * 4096
+    i = i - 1
 
-The leaf DDT page is indexed by DDI[0] and holds the device-context (DC).
+# ===== LEAF level =====
+DC_addr = a + DDI[0] * DC_SIZE                  # DC_SIZE = 64 (extended) or 32 (base)
+DC      = read_LE_bytes(DC_addr, DC_SIZE)
+if access_fault(DC_addr):    fault(cause=257)
+if data_corruption(DC_addr): fault(cause=268)
+if DC.tc.V == 0:             fault(cause=258)
+if misconfigured(DC):        fault(cause=259)   # see §3.1.4 for full list
 
-In base-format the DC is 32-bytes. In extended-format the DC is 64-bytes.
+return DC
+```
 
-| Figure 13. Base-format device-context |
-|---------------------------------------|
+#### Per-level reference table (Figure 10: extended format, DC = 64 byte)
 
-![](_page_24_Figure_5.jpeg)
+| iommu_mode | Walk step (i) | Index used | Index bit slice | Index width | Page entry size | Entry address formula |
+| :--------- | :-----------: | :--------- | :-------------- | :---------: | :-------------: | :-------------------- |
+| **3LVL**   | 2 (root)      | `DDI[2]`   | `device_id[23:15]` | 9 bit    | 8 B (non-leaf)  | `ddtp.PPN × 4096 + DDI[2] × 8` |
+| **3LVL**   | 1             | `DDI[1]`   | `device_id[14:6]`  | 9 bit    | 8 B (non-leaf)  | `ddte_lv2.PPN × 4096 + DDI[1] × 8` |
+| **3LVL**   | 0 (leaf)      | `DDI[0]`   | `device_id[5:0]`   | 6 bit    | **64 B (DC)**   | `ddte_lv1.PPN × 4096 + DDI[0] × 64` |
+| **2LVL**   | 1 (root)      | `DDI[1]`   | `device_id[14:6]`  | 9 bit    | 8 B (non-leaf)  | `ddtp.PPN × 4096 + DDI[1] × 8` |
+| **2LVL**   | 0 (leaf)      | `DDI[0]`   | `device_id[5:0]`   | 6 bit    | **64 B (DC)**   | `ddte_lv1.PPN × 4096 + DDI[0] × 64` |
+| **1LVL**   | 0 (root=leaf) | `DDI[0]`   | `device_id[5:0]`   | 6 bit    | **64 B (DC)**   | `ddtp.PPN × 4096 + DDI[0] × 64` |
+
+(For 2LVL: `device_id[23:15]` must be 0. For 1LVL: `device_id[23:6]` must be 0. Otherwise cause = 260.)
+
+#### Per-level reference table (Figure 11: base format, DC = 32 byte)
 
-*Figure 14. Extended-format device-context*
+| iommu_mode | Walk step (i) | Index used | Index bit slice | Index width | Page entry size | Entry address formula |
+| :--------- | :-----------: | :--------- | :-------------- | :---------: | :-------------: | :-------------------- |
+| **3LVL**   | 2 (root)      | `DDI[2]`   | `device_id[23:16]` | 8 bit    | 8 B (non-leaf)  | `ddtp.PPN × 4096 + DDI[2] × 8` |
+| **3LVL**   | 1             | `DDI[1]`   | `device_id[15:7]`  | 9 bit    | 8 B (non-leaf)  | `ddte_lv2.PPN × 4096 + DDI[1] × 8` |
+| **3LVL**   | 0 (leaf)      | `DDI[0]`   | `device_id[6:0]`   | 7 bit    | **32 B (DC)**   | `ddte_lv1.PPN × 4096 + DDI[0] × 32` |
+| **2LVL**   | 1 (root)      | `DDI[1]`   | `device_id[15:7]`  | 9 bit    | 8 B (non-leaf)  | `ddtp.PPN × 4096 + DDI[1] × 8` |
+| **2LVL**   | 0 (leaf)      | `DDI[0]`   | `device_id[6:0]`   | 7 bit    | **32 B (DC)**   | `ddte_lv1.PPN × 4096 + DDI[0] × 32` |
+| **1LVL**   | 0 (root=leaf) | `DDI[0]`   | `device_id[6:0]`   | 7 bit    | **32 B (DC)**   | `ddtp.PPN × 4096 + DDI[0] × 32` |
+
+(For 2LVL: `device_id[23:16]` must be 0. For 1LVL: `device_id[23:7]` must be 0. Otherwise cause = 260.)
+
+#### Worked example (matches the testbench setup)
+
+Configuration: extended format DC, 1LVL DDT, `did = 0`, `ddtp.PPN = 0x10`.
 
-The DC is interpreted as four 64-bit doublewords in base-format and as eight 64-bit doublewords in extended-format. The byte order of each of the doublewords in memory, little-endian or big-endian, is the endianness as determined by fctl.BE ([Section 6.4](#page-66-0)). The IOMMU may read the DC fields in any order.
+```
+device_id   = 0x000000
+DDI[0]      = device_id[5:0]            = 0
+DC_SIZE     = 64
+DC_addr     = ddtp.PPN × 4096 + DDI[0] × 64
+            = 0x10 × 0x1000 + 0 × 64
+            = 0x10000
+DC bytes    = ds_ram[0x10000 .. 0x1003F]   (64 bytes)
+```
 
-### <span id="page-25-0"></span>3.1.3. Device-context fields
+The IOMMU's DDT walk burst should therefore read **7 beats × 8 byte = 56 byte** starting at `araddr = 0x10000` (the spec allows the walker to skip the last reserved DW of the extended DC).
 
-### <span id="page-25-1"></span>3.1.3.1. Translation control (**tc**)
+### 3.1.1. Non-leaf DDT entry
 
-| 63 |          |     |     |     |     |      |      |      |      |      |       |        |        | 48 |
-|----|----------|-----|-----|-----|-----|------|------|------|------|------|-------|--------|--------|----|
-|    | '        |     |     |     |     | rese | rved |      |      |      |       |        |        |    |
-| 47 |          |     |     |     |     |      |      |      |      |      |       |        |        | 32 |
-|    | ,        |     |     |     |     | rese | rved |      |      |      |       |        |        |    |
-| 31 |          |     |     |     |     | 24   | 23   |      |      |      |       |        |        | 16 |
-|    | '        | cus | tom |     |     |      |      |      |      | rese | erved |        |        |    |
-| 15 | <u> </u> | 12  | 11  | 10  | 9   | 8    | 7    | 6    | 5    | 4    | 3     | 2      | 1      | 0  |
-|    | reserved | '   | SXL | SBE | DPE | SADE | GADE | PRPR | PDTV | DTF  | T2GPA | EN_PRI | EN_ATS | V  |
+A valid (`V==1`) non-leaf DDT entry provides the PPN of the next level DDT.
 
-*Figure 15. Translation control (*tc*) field*
+**Figure 12. Non-leaf device-directory-table entry**
 
-DC is valid if the V bit is 1; If it is 0, all other bits in DC are don't-care and may be freely used by software.
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:54** | reserved |
+| **53:10** | PPN      |
+| **9:1**   | reserved |
+| **0**     | V        |
 
-If the IOMMU supports PCIe ATS specification [\[4](#page-106-4)] (see capabilities register), the EN\_ATS bit is used to enable ATS transaction processing. If EN\_ATS is set to 1, IOMMU supports the following inbound transactions; otherwise they are treated as unsupported requests.
+### 3.1.2. Leaf DDT entry
 
-- ⚫ Translated read for execute transaction
-- ⚫ Translated read transaction
-- ⚫ Translated write/AMO transaction
-- ⚫ PCIe ATS Translation Request
-- ⚫ PCIe ATS Invalidation Completion Message
+The leaf DDT page is indexed by `DDI[0]` and holds the device-context (`DC`).
 
-If the EN\_ATS bit is 1 and the T2GPA bit is set to 1 the IOMMU performs the two-stage address translation to determine the permissions and the size of the translation to be provided in the completion of a PCIe ATS Translation Request from the device. However, the IOMMU returns a GPA, instead of a SPA, as the translation of an IOVA in the response. In this mode of operation, the ATC in the device caches a GPA as a translation for an IOVA and uses the GPA as the address in subsequent translated memory access transactions. Usually, translated requests use a SPA and need no further translation to be performed by the IOMMU. However when T2GPA is 1, translated requests from a device use a GPA and are translated by the IOMMU using the second-stage page table to a SPA. The T2GPA control enables a hypervisor to contain DMA from a device, even if the device misuses the ATS capability and attempts to access memory that is not associated with the VM.
+In base-format the `DC` is 32-bytes. In extended-format the `DC` is 64-bytes.
 
-![](_page_25_Picture_13.jpeg)
+**Figure 13. Base-format device-context (32 byte = 4 doublewords)**
 
-*When* T2GPA *is enabled, the addresses provided to the device in response to a PCIe ATS Translation Request cannot be directly routed by the I/O fabric (e.g. PCI switches) that connect the device to other peer devices and to host. Such addresses also cannot be routed within the device when peer-to-peer transactions within the device (e.g. between functions of a device) are supported.*
+| Bits        | Field                                            |
+| :---------- | :----------------------------------------------- |
+| **255:192** | First-stage-context (`fsc`)                      |
+| **191:128** | Translation-attributes (`ta`)                    |
+| **127:64**  | IO Hypervisor guest address translation (`iohgatp`) |
+| **63:0**    | Translation-control (`tc`)                       |
 
-*Use of* T2GPA *set to 1 may not be compatible with devices that implement caches tagged by the translated address returned in response to a PCIe ATS Translation Request.*
+**Figure 14. Extended-format device-context (64 byte = 8 doublewords)**
 
-*Hypervisors that configure* T2GPA *to 1 must ensure through protocol-specific means that translated accesses are routed through the host such that the IOMMU may translate the GPA and then route the transaction based on PA to memory or to a peer device. For PCIe, for example, the Access Control Service (ACS) must be configured to always redirect peer-to-peer (P2P) requests upstream to the host.*
+| Bits        | Field                                            |
+| :---------- | :----------------------------------------------- |
+| **511:448** | reserved                                         |
+| **447:384** | MSI-address-pattern (`msi_addr_pattern`)         |
+| **383:320** | MSI-address-mask (`msi_addr_mask`)               |
+| **319:256** | MSI-page-table pointer (`msiptp`)                |
+| **255:192** | First-stage-context (`fsc`)                      |
+| **191:128** | Translation-attributes (`ta`)                    |
+| **127:64**  | IO Hypervisor guest address translation (`iohgatp`) |
+| **63:0**    | Translation-control (`tc`)                       |
 
-![](_page_26_Picture_2.jpeg)
+The `DC` is interpreted as four 64-bit doublewords in base-format and as eight 64-bit doublewords in extended-format. The byte order of each of the doublewords in memory, little-endian or big-endian, is the endianness as determined by `fctl.BE` (Section 6.4). The IOMMU may read the `DC` fields in any order.
 
-*As an alternative to setting* T2GPA *to 1, the hypervisor may establish a trust relationship with the device if authentication protocols are supported by the device. For PCIe, for example, the PCIe component measurement and authentication (CMA) capability provides a mechanism to verify the device's configuration and firmware/executable (Measurement) and hardware identities (Authentication) to establish such a trust relationship.*
+### 3.1.3. Device-context fields
 
-If EN\_PRI bit is 0, then PCIe "Page Request" messages from the device are invalid requests. A "Page Request" message received from a device is responded to with a "Page Request Group Response" message. Normally, a software handler generates this response message. However, under some conditions the IOMMU itself may generate a response. For IOMMU-generated "Page Request Group Response" messages the PRGresponse-PASID-required (PRPR) bit when set to 1 indicates that the IOMMU response message should include a PASID if the associated "Page Request" had a PASID.
+#### 3.1.3.1. Translation control (`tc`)
 
-![](_page_26_Picture_5.jpeg)
+**Figure 15. Translation control (`tc`) field**
 
-*Functions that support PASID and have the "PRG Response PASID Required" capability bit set to 1, expect that "Page Request Group Response" messages will contain a PASID if the associated "Page Request" message had a PASID. If the capability bit is 0, the function does not expect PASID on any "Page Request Group Response" message and the behavior of the function if it receives the response with a PASID is undefined. The* PRPR *bit should be configured with the value held in the "PRG Response PASID Required" capability bit.*
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:32** | reserved |
+| **31:24** | custom   |
+| **23:12** | reserved |
+| **11**    | SXL      |
+| **10**    | SBE      |
+| **9**     | DPE      |
+| **8**     | SADE     |
+| **7**     | GADE     |
+| **6**     | PRPR     |
+| **5**     | PDTV     |
+| **4**     | DTF      |
+| **3**     | T2GPA    |
+| **2**     | EN_PRI   |
+| **1**     | EN_ATS   |
+| **0**     | V        |
 
-Setting the disable-translation-fault (DTF) bit to 1 disables reporting of faults encountered in the address translation process. Setting DTF to 1 does not disable error responses from being generated to the device in response to faulting transactions. Setting DTF to 1 does not disable reporting of faults from the IOMMU that are not related to the address translation process. The faults that are not reported when DTF is 1 are listed in [Table 13.](#page-56-1)
+`DC` is valid if the `V` bit is 1; If it is 0, all other bits in `DC` are don't-care and may be freely used by software.
 
-![](_page_26_Picture_8.jpeg)
+If the IOMMU supports PCIe ATS specification (see `capabilities` register), the `EN_ATS` bit is used to enable ATS transaction processing. If `EN_ATS` is set to 1, IOMMU supports the following inbound transactions; otherwise they are treated as unsupported requests:
 
-*A hypervisor may set* DTF *to 1 to disable fault reporting when it has identified conditions that may lead to a flurry of errors such as due to an abnormal termination of a virtual machine.*
+- Translated read for execute transaction
+- Translated read transaction
+- Translated write/AMO transaction
+- PCIe ATS Translation Request
+- PCIe ATS Invalidation Completion Message
 
-The DC.fsc field holds the context for first-stage translation. If the PDTV bit is 1, the field holds the processdirectory table pointer (pdtp). If the PDTV bit is 0, the DC.fsc field holds (iosatp).
+If the `EN_ATS` bit is 1 and the `T2GPA` bit is set to 1 the IOMMU performs the two-stage address translation to determine the permissions and the size of the translation to be provided in the completion of a PCIe ATS Translation Request from the device. However, the IOMMU returns a GPA, instead of a SPA, as the translation of an IOVA in the response. In this mode of operation, the ATC in the device caches a GPA as a translation for an IOVA and uses the GPA as the address in subsequent translated memory access transactions. Usually, translated requests use a SPA and need no further translation to be performed by the IOMMU. However when `T2GPA` is 1, translated requests from a device use a GPA and are translated by the IOMMU using the second-stage page table to a SPA. The `T2GPA` control enables a hypervisor to contain DMA from a device, even if the device misuses the ATS capability and attempts to access memory that is not associated with the VM.
 
-The PDTV bit is expected to be set to 1 when DC is associated with a device that supports multiple process contexts and thus generates a valid process\_id with its memory accesses. For PCIe, for example, if the request has a PASID then the PASID is used as the process\_id.
+> **Notes:**
+> - When `T2GPA` is enabled, the addresses provided to the device in response to a PCIe ATS Translation Request cannot be directly routed by the I/O fabric (e.g. PCI switches) that connect the device to other peer devices and to host. Such addresses also cannot be routed within the device when peer-to-peer transactions within the device (e.g. between functions of a device) are supported.
+> - Use of `T2GPA` set to 1 may not be compatible with devices that implement caches tagged by the translated address returned in response to a PCIe ATS Translation Request.
+> - Hypervisors that configure `T2GPA` to 1 must ensure through protocol-specific means that translated accesses are routed through the host such that the IOMMU may translate the GPA and then route the transaction based on PA to memory or to a peer device. For PCIe, for example, the Access Control Service (ACS) must be configured to always redirect peer-to-peer (P2P) requests upstream to the host.
+> - As an alternative to setting `T2GPA` to 1, the hypervisor may establish a trust relationship with the device if authentication protocols are supported by the device. For PCIe, for example, the PCIe component measurement and authentication (CMA) capability provides a mechanism to verify the device's configuration and firmware/executable (Measurement) and hardware identities (Authentication) to establish such a trust relationship.
 
-When PDTV is 1, the DPE bit may set to 1 to enable the use of 0 as the default value of process\_id for translating requests without a valid process\_id. When PDTV is 0, the DPE bit is reserved for future standard extension.
+If `EN_PRI` bit is 0, then PCIe "Page Request" messages from the device are invalid requests. A "Page Request" message received from a device is responded to with a "Page Request Group Response" message. Normally, a software handler generates this response message. However, under some conditions the IOMMU itself may generate a response. For IOMMU-generated "Page Request Group Response" messages the PRG-response-PASID-required (`PRPR`) bit when set to 1 indicates that the IOMMU response message should include a PASID if the associated "Page Request" had a PASID.
 
-The IOMMU supports the 1 setting of GADE and SADE bits if capabilities.AMO\_HWAD is 1. When capabilities.AMO\_HWAD is 0, these bits are reserved.
+> **Note**: Functions that support PASID and have the "PRG Response PASID Required" capability bit set to 1, expect that "Page Request Group Response" messages will contain a PASID if the associated "Page Request" message had a PASID. If the capability bit is 0, the function does not expect PASID on any "Page Request Group Response" message and the behavior of the function if it receives the response with a PASID is undefined. The `PRPR` bit should be configured with the value held in the "PRG Response PASID Required" capability bit.
 
-If GADE is 1, the IOMMU updates A and D bits in second-stage PTEs atomically. If GADE is 0, the IOMMU causes a guest-page-fault corresponding to the original access type if the A bit is 0 or if the memory access is a store and the D bit is 0.
+Setting the disable-translation-fault (`DTF`) bit to 1 disables reporting of faults encountered in the address translation process. Setting `DTF` to 1 does not disable error responses from being generated to the device in response to faulting transactions. Setting `DTF` to 1 does not disable reporting of faults from the IOMMU that are not related to the address translation process. The faults that are not reported when `DTF` is 1 are listed in Table 13.
 
-If SADE is 1, the IOMMU updates A and D bits in first-stage PTEs atomically. If SADE is 0, the IOMMU causes a page-fault corresponding to the original access type if the A bit is 0 or if the memory access is a store and the D bit is 0.
+> **Note**: A hypervisor may set `DTF` to 1 to disable fault reporting when it has identified conditions that may lead to a flurry of errors such as due to an abnormal termination of a virtual machine.
 
-If SBE is 0, implicit memory accesses to PDT entries and first-stage PTEs are little-endian else they are bigendian. The supported values of SBE are the same as that of the fctl.BE field.
+The `DC.fsc` field holds the context for first-stage translation. If the `PDTV` bit is 1, the field holds the process-directory table pointer (`pdtp`). If the `PDTV` bit is 0, the `DC.fsc` field holds (`iosatp`).
 
-The SXL field controls the supported paged virtual-memory schemes as defined in [Table 4](#page-29-0) and [Table 5](#page-29-1). If fctl.GXL is 1 then the SXL field must be 1; otherwise the legal values for the SXL field are the same as those for the fctl.GXL field.
+The `PDTV` bit is expected to be set to 1 when `DC` is associated with a device that supports multiple process contexts and thus generates a valid `process_id` with its memory accesses. For PCIe, for example, if the request has a PASID then the PASID is used as the `process_id`.
 
-When SXL is 1, the following rules apply:
+When `PDTV` is 1, the `DPE` bit may set to 1 to enable the use of 0 as the default value of `process_id` for translating requests without a valid `process_id`. When `PDTV` is 0, the `DPE` bit is reserved for future standard extension.
 
-- ⚫ If the first-stage is not Bare, then a page fault corresponding to the original access type occurs if the IOVA has bits beyond bit 31 set to 1.
-- ⚫ If the second-stage is not Bare, then a guest page fault corresponding to the original access type occurs if the incoming GPA has bits beyond bit 33 set to 1.
+The IOMMU supports the 1 setting of `GADE` and `SADE` bits if `capabilities.AMO_HWAD` is 1. When `capabilities.AMO_HWAD` is 0, these bits are reserved.
 
-#### <span id="page-27-0"></span>3.1.3.2. IO hypervisor guest address translation and protection (**iohgatp**)
+If `GADE` is 1, the IOMMU updates A and D bits in second-stage PTEs atomically. If `GADE` is 0, the IOMMU causes a guest-page-fault corresponding to the original access type if the A bit is 0 or if the memory access is a store and the D bit is 0.
 
-![](_page_27_Figure_8.jpeg)
+If `SADE` is 1, the IOMMU updates A and D bits in first-stage PTEs atomically. If `SADE` is 0, the IOMMU causes a page-fault corresponding to the original access type if the A bit is 0 or if the memory access is a store and the D bit is 0.
 
-*Figure 16. IO hypervisor guest address translation and protection (*iohgatp*) field*
+If `SBE` is 0, implicit memory accesses to PDT entries and first-stage PTEs are little-endian else they are big-endian. The supported values of `SBE` are the same as that of the `fctl.BE` field.
 
-The iohgatp field holds the PPN of the root second-stage page table and a virtual machine identified by a guest soft-context ID (GSCID), to facilitate address-translation fences on a per-virtual-machine basis. If multiple devices are associated to a VM with a common second-stage page table, the hypervisor is expected to program the same GSCID in each iohgatp. The MODE field is used to select the second-stage address translation scheme.
+The `SXL` field controls the supported paged virtual-memory schemes as defined in Table 4 and Table 5. If `fctl.GXL` is 1 then the `SXL` field must be 1; otherwise the legal values for the `SXL` field are the same as those for the `fctl.GXL` field.
 
-The second-stage page table formats are as defined by the Privileged specification. The fctl.GXL field controls the supported address-translation schemes for guest physical addresses as defined in [Table 2](#page-27-1) and [Table 3.](#page-27-2)
+When `SXL` is 1, the following rules apply:
 
-<span id="page-27-1"></span>The iohgatp MODE field identifies the paged virtual-memory schemes and its encodings are as follows:
+- If the first-stage is not Bare, then a page fault corresponding to the original access type occurs if the IOVA has bits beyond bit 31 set to 1.
+- If the second-stage is not Bare, then a guest page fault corresponding to the original access type occurs if the incoming GPA has bits beyond bit 33 set to 1.
 
-| Value | Name | Description                                                            |
-|-------|------|------------------------------------------------------------------------|
-| 0     | Bare | No translation or protection.                                          |
-| 1-7   | —    | Reserved for standard use.                                             |
-| 8     |      | Sv39x4 Page-based 41-bit virtual addressing (2-bit extension of Sv39). |
-| 9     |      | Sv48x4 Page-based 50-bit virtual addressing (2-bit extension of Sv48). |
-| 10    |      | Sv57x4 Page-based 59-bit virtual addressing (2-bit extension of Sv57). |
-| 11-15 | —    | Reserved for standard use.                                             |
+#### 3.1.3.2. IO hypervisor guest address translation and protection (`iohgatp`)
 
-*Table 2. Encodings of* iohgatp.MODE *field when* fctl.GXL=0
+**Figure 16. IO hypervisor guest address translation and protection (`iohgatp`) field**
 
-*Table 3. Encodings of* iohgatp.MODE *field when* fctl.GXL=1
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:60** | MODE     |
+| **59:44** | GSCID    |
+| **43:0**  | PPN      |
 
-<span id="page-27-2"></span>
+The `iohgatp` field holds the PPN of the root second-stage page table and a virtual machine identified by a guest soft-context ID (`GSCID`), to facilitate address-translation fences on a per-virtual-machine basis. If multiple devices are associated to a VM with a common second-stage page table, the hypervisor is expected to program the same `GSCID` in each `iohgatp`. The `MODE` field is used to select the second-stage address translation scheme.
 
-| Value | Name | Description                   |
-|-------|------|-------------------------------|
-| 0     | Bare | No translation or protection. |
-| 1-7   | —    | Reserved for standard use.    |
+The second-stage page table formats are as defined by the Privileged specification. The `fctl.GXL` field controls the supported address-translation schemes for guest physical addresses as defined in Table 2 and Table 3.
 
-| Value | Name | Description                                                            |
-|-------|------|------------------------------------------------------------------------|
-| 8     |      | Sv32x4 Page-based 34-bit virtual addressing (2-bit extension of Sv32). |
-| 9-15  | —    | Reserved for standard use.                                             |
+The `iohgatp` `MODE` field identifies the paged virtual-memory schemes:
 
-Implementations are not required to support all defined mode settings for iohgatp. The IOMMU only needs to support the modes also supported by the MMU in the harts integrated into the system or a subset thereof.
+**Table 2. Encodings of `iohgatp.MODE` field when `fctl.GXL=0`**
 
-The root page table as determined by iohgatp.PPN is 16 KiB and must be aligned to a 16-KiB boundary.
+| Value | Name      | Description                                                  |
+| :---: | :-------- | :----------------------------------------------------------- |
+| 0     | `Bare`    | No translation or protection.                                |
+| 1-7   | —         | Reserved for standard use.                                   |
+| 8     | `Sv39x4`  | Page-based 41-bit virtual addressing (2-bit extension of Sv39). |
+| 9     | `Sv48x4`  | Page-based 50-bit virtual addressing (2-bit extension of Sv48). |
+| 10    | `Sv57x4`  | Page-based 59-bit virtual addressing (2-bit extension of Sv57). |
+| 11-15 | —         | Reserved for standard use.                                   |
 
-![](_page_28_Picture_4.jpeg)
+**Table 3. Encodings of `iohgatp.MODE` field when `fctl.GXL=1`**
 
-*The* GSCID *field of* iohgatp *identifies an address space. If an identical* GSCID *is configured in two* DC *when the second-stage page-table referenced by the two* DC *are not identical then it is unpredictable whether the IOMMU uses the PTEs from the first page table or the second page table. These are the only expected behaviors.*
+| Value | Name      | Description                                                  |
+| :---: | :-------- | :----------------------------------------------------------- |
+| 0     | `Bare`    | No translation or protection.                                |
+| 1-7   | —         | Reserved for standard use.                                   |
+| 8     | `Sv32x4`  | Page-based 34-bit virtual addressing (2-bit extension of Sv32). |
+| 9-15  | —         | Reserved for standard use.                                   |
 
-#### <span id="page-28-0"></span>3.1.3.3. Translation attributes (**ta**)
+Implementations are not required to support all defined mode settings for `iohgatp`. The IOMMU only needs to support the modes also supported by the MMU in the harts integrated into the system or a subset thereof.
 
-![](_page_28_Figure_7.jpeg)
+The root page table as determined by `iohgatp.PPN` is 16 KiB and must be aligned to a 16-KiB boundary.
 
-*Figure 17. Translation attributes (*ta*) field*
+> **Note**: The `GSCID` field of `iohgatp` identifies an address space. If an identical `GSCID` is configured in two `DC` when the second-stage page-table referenced by the two `DC` are not identical then it is unpredictable whether the IOMMU uses the PTEs from the first page table or the second page table. These are the only expected behaviors.
 
-The PSCID field of ta provides the process soft-context ID that identifies the address-space of the process. PSCID facilitates address-translation fences on a per-address-space basis. The PSCID field in ta is used as the address-space ID if DC.tc.PDTV is 0 and the iosatp.MODE field is not Bare. When DC.tc.PDTV is 1, the PSCID field in ta is ignored.
+#### 3.1.3.3. Translation attributes (`ta`)
 
-The RCID and MCID fields are added by the QoS ID extension. If capabilities.QOSID is 0, these bits are reserved and must be set to 0. IOMMU-initiated requests for accessing the following data structures use the value configured in the RCID and MCID fields of DC.ta.
+**Figure 17. Translation attributes (`ta`) field**
 
-- ⚫ Process directory table (PDT)
-- ⚫ Second-stage page table
-- ⚫ First-stage page table
-- ⚫ MSI page table
-- ⚫ Memory-resident interrupt file (MRIF)
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:52** | MCID     |
+| **51:40** | RCID     |
+| **39:32** | reserved |
+| **31:12** | PSCID    |
+| **11:0**  | reserved |
 
-The RCID and MCID configured in DC.ta are provided to the IO bridge on successful address translations. The IO bridge should associate these QoS IDs with device-initiated requests.
+The `PSCID` field of `ta` provides the process soft-context ID that identifies the address-space of the process. `PSCID` facilitates address-translation fences on a per-address-space basis. The `PSCID` field in `ta` is used as the address-space ID if `DC.tc.PDTV` is 0 and the `iosatp.MODE` field is not Bare. When `DC.tc.PDTV` is 1, the `PSCID` field in `ta` is ignored.
 
-### <span id="page-28-1"></span>3.1.3.4. First-Stage context (**fsc**)
+The `RCID` and `MCID` fields are added by the QoS ID extension. If `capabilities.QOSID` is 0, these bits are reserved and must be set to 0. IOMMU-initiated requests for accessing the following data structures use the value configured in the `RCID` and `MCID` fields of `DC.ta`:
 
-If DC.tc.PDTV is 0, the DC.fsc field holds the iosatp that provides the controls for first-stage address translation and protection.
+- Process directory table (`PDT`)
+- Second-stage page table
+- First-stage page table
+- MSI page table
+- Memory-resident interrupt file (`MRIF`)
 
-![](_page_29_Figure_1.jpeg)
+The `RCID` and `MCID` configured in `DC.ta` are provided to the IO bridge on successful address translations. The IO bridge should associate these QoS IDs with device-initiated requests.
 
-*Figure 18. IO Supervisor address translation and prot. (*iosatp*) field*
+#### 3.1.3.4. First-Stage context (`fsc`)
+
+If `DC.tc.PDTV` is 0, the `DC.fsc` field holds the `iosatp` that provides the controls for first-stage address translation and protection.
+
+**Figure 18. IO Supervisor address translation and prot. (`iosatp`) field**
+
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:60** | MODE     |
+| **59:44** | reserved |
+| **43:0**  | PPN      |
 
 The first-stage page table formats are as defined by the Privileged specification.
 
-The DC.tc.SXL field controls the supported paged virtual-memory schemes.
+The `DC.tc.SXL` field controls the supported paged virtual-memory schemes.
 
-The iosatp.MODE identifies the paged virtual-memory schemes and is encoded as defined in [Table 4](#page-29-0) and [Table 5.](#page-29-1) The iosatp.PPN field holds the PPN of the root page of a first-stage page table.
+The `iosatp.MODE` identifies the paged virtual-memory schemes and is encoded as defined in Table 4 and Table 5. The `iosatp.PPN` field holds the PPN of the root page of a first-stage page table.
 
-<span id="page-29-0"></span>When second-stage address translation is not Bare, the iosatp.PPN is a guest PPN. The GPA of the root page is then converted by guest physical address translation process, as controlled by the iohgatp, into a supervisor physical address.
+When second-stage address translation is not Bare, the `iosatp.PPN` is a guest PPN. The GPA of the root page is then converted by guest physical address translation process, as controlled by the `iohgatp`, into a supervisor physical address.
 
-| Value | Name | Description                           |  |
-|-------|------|---------------------------------------|--|
-| 0     | Bare | No translation or protection.         |  |
-| 1-7   | —    | Reserved for standard use.            |  |
-| 8     | Sv39 | Page-based 39-bit virtual addressing. |  |
-| 9     | Sv48 | Page-based 48-bit virtual addressing. |  |
-| 10    | Sv57 | Page-based 57-bit virtual addressing. |  |
-| 11-13 | —    | Reserved for standard use.            |  |
-| 14-15 | —    | Designated for custom use.            |  |
+**Table 4. Encodings of `iosatp.MODE` field when `DC.tc.SXL=0`**
 
-*Table 4. Encodings of* iosatp.MODE *field when* DC.tc.SXL=0
+| Value | Name   | Description                       |
+| :---: | :----- | :-------------------------------- |
+| 0     | `Bare` | No translation or protection.     |
+| 1-7   | —      | Reserved for standard use.        |
+| 8     | `Sv39` | Page-based 39-bit virtual addressing. |
+| 9     | `Sv48` | Page-based 48-bit virtual addressing. |
+| 10    | `Sv57` | Page-based 57-bit virtual addressing. |
+| 11-13 | —      | Reserved for standard use.        |
+| 14-15 | —      | Designated for custom use.        |
 
-*Table 5. Encodings of* iosatp.MODE *field when* DC.tc.SXL=1
+**Table 5. Encodings of `iosatp.MODE` field when `DC.tc.SXL=1`**
 
-| Value | Name | Description                           |
-|-------|------|---------------------------------------|
-| 0     | Bare | No translation or protection.         |
-| 1-7   | —    | Reserved for standard use.            |
-| 8     | Sv32 | Page-based 32-bit virtual addressing. |
-| 9-15  | —    | Reserved for standard use.            |
+| Value | Name   | Description                       |
+| :---: | :----- | :-------------------------------- |
+| 0     | `Bare` | No translation or protection.     |
+| 1-7   | —      | Reserved for standard use.        |
+| 8     | `Sv32` | Page-based 32-bit virtual addressing. |
+| 9-15  | —      | Reserved for standard use.        |
 
-<span id="page-29-1"></span>When DC.tc.PDTV is 1, the DC.fsc field holds the process-directory table pointer (pdtp). When the device supports multiple process contexts, selected by the process\_id, the PDT is used to determine the first-stage page table and associated PSCID for virtual address translation and protection.
+When `DC.tc.PDTV` is 1, the `DC.fsc` field holds the process-directory table pointer (`pdtp`). When the device supports multiple process contexts, selected by the `process_id`, the PDT is used to determine the first-stage page table and associated `PSCID` for virtual address translation and protection.
 
-The pdtp field holds the PPN of the root PDT and the MODE field that determines the number of levels of the PDT.
+The `pdtp` field holds the PPN of the root PDT and the `MODE` field that determines the number of levels of the PDT.
 
-![](_page_29_Figure_13.jpeg)
+**Figure 19. Process-directory table pointer (`pdtp`) field**
 
-*Figure 19. Process-directory table pointer (*pdtp*) field*
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:60** | MODE     |
+| **59:44** | reserved |
+| **43:0**  | PPN      |
+
+When second-stage address translation is not Bare, the `pdtp.PPN` field holds a guest PPN. The GPA of the root PDT is then converted by guest physical address translation process, as controlled by the `iohgatp`, into a supervisor physical address. Translating addresses of PDT using a second-stage page table, allows the PDT to be held in memory allocated by the guest OS and allows the guest OS to directly edit the PDT to associate a virtual-address space identified by a first-stage page table with a `process_id`.
+
+**Table 6. Encodings of `pdtp.MODE` field**
+
+| Value | Name   | Description                                                                                                            |
+| :---: | :----- | :--------------------------------------------------------------------------------------------------------------------- |
+| 0     | `Bare` | No first-stage address translation or protection.                                                                      |
+| 1     | `PD8`  | 8-bit process ID enabled. The directory has 1 levels with 256 entries. The bits 19:8 of `process_id` must be 0.        |
+| 2     | `PD17` | 17-bit process ID enabled. The directory has 2 levels. The root PDT page has 512 entries and leaf level has 256 entries. The bits 19:17 of `process_id` must be 0. |
+| 3     | `PD20` | 20-bit process ID enabled. The directory has 3 levels. The root PDT has 8 entries and the next non-leaf level has 512 entries. The leaf level has 256 entries. |
+| 4-13  | —      | Reserved for standard use.                                                                                             |
+| 14-15 | —      | Designated for custom use.                                                                                             |
+
+#### 3.1.3.5. MSI page table pointer (`msiptp`)
+
+**Figure 20. MSI page table pointer (`msiptp`) field**
+
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:60** | MODE     |
+| **59:44** | reserved |
+| **43:0**  | PPN      |
 
-When second-stage address translation is not Bare, the pdtp.PPN field holds a guest PPN. The GPA of the root PDT is then converted by guest physical address translation process, as controlled by the iohgatp, into a supervisor physical address. Translating addresses of PDT using a second-stage page table, allows the PDT to be held in memory allocated by the guest OS and allows the guest OS to directly edit the PDT to associate a virtual-address space identified by a first-stage page table with a process\_id.
+The `msiptp.PPN` field holds the PPN of the root MSI page table used to direct an MSI to a guest interrupt file in an IMSIC. The MSI page table formats are defined by the Advanced Interrupt Architecture specification.
 
-*Table 6. Encodings of* pdtp.MODE *field*
+The `msiptp.MODE` field is used to select the MSI address translation scheme.
 
-| Value | Name | Description                                                                                                                                                         |
-|-------|------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 0     | Bare | No first-stage address translation or protection.                                                                                                                   |
-| 1     | PD8  | 8-bit process ID enabled. The directory has 1 levels with 256 entries.The bits 19:8 of process_id must<br>be 0.                                                     |
-| 2     | PD17 | 17-bit process ID enabled. The directory has 2 levels. The root PDT page has 512 entries and leaf level<br>has 256 entries. The bits 19:17 of process_id must be 0. |
-| 3     | PD20 | 20-bit process ID enabled. The directory has 3 levels. The root PDT has 8 entries and the next non-leaf<br>level has 512 entries. The leaf level has 256 entries.   |
-| 4-13  | —    | Reserved for standard use.                                                                                                                                          |
-| 14-15 | —    | Designated for custom use.                                                                                                                                          |
+**Table 7. Encodings of `msiptp.MODE` field**
 
-### <span id="page-30-0"></span>3.1.3.5. MSI page table pointer (**msiptp**)
+| Value | Name   | Description                                                                          |
+| :---: | :----- | :----------------------------------------------------------------------------------- |
+| 0     | `Off`  | Recognition of accesses to a virtual interrupt file using MSI address mask and pattern is not performed. |
+| 1     | `Flat` | Flat MSI page table.                                                                 |
+| 2-13  | —      | Reserved for standard use.                                                           |
+| 14-15 | —      | Designated for custom use.                                                           |
 
-![](_page_30_Figure_5.jpeg)
+#### 3.1.3.6. MSI address mask (`msi_addr_mask`) and pattern (`msi_addr_pattern`)
 
-*Figure 20. MSI page table pointer (*msiptp*) field*
+**Figure 21. MSI address mask (`msi_addr_mask`) field**
+
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:52** | reserved |
+| **51:0**  | mask     |
+
+**Figure 22. MSI address pattern (`msi_addr_pattern`) field**
+
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:52** | reserved |
+| **51:0**  | pattern  |
+
+The MSI address mask (`msi_addr_mask`) and pattern (`msi_addr_pattern`) fields are used to identify the 4-KiB pages of virtual interrupt files in the guest physical address space of the relevant VM. An incoming memory access made by a device is recognized as an access to a virtual interrupt file if the destination guest physical page matches the supplied address pattern in all bit positions that are zeros in the supplied address mask. In detail, a memory access to guest physical address A is recognized as an access to a virtual interrupt file's memory-mapped page if:
+
+```
+(A >> 12) & ~msi_addr_mask = (msi_addr_pattern & ~msi_addr_mask)
+```
+
+where `>> 12` represents shifting right by 12 bits, an ampersand (`&`) represents bitwise logical AND, and `~msi_addr_mask` is the bitwise logical complement of the address mask.
+
+While the MSI address mask and pattern fields are 52 bits wide, if `MGPAW < 64`, then bits `51:MGPAW-12` are reserved for future standard use and must be set to zero by software. `MGPAW` is determined as follows:
+
+- If `capabilities.Sv57x4` is 1, then `MGPAW = 59`
+- Else if `capabilities.Sv48x4` is 1, then `MGPAW = 50`
+- Else if `capabilities.Sv39x4` is 1, then `MGPAW = 41`
+- Else if `capabilities.Sv32x4` is 1, then `MGPAW = 34`
+- Otherwise, `MGPAW = capabilities.PAS`
+
+### 3.1.4. Device-context configuration checks
+
+A `DC` with `DC.tc.V=1` is considered as misconfigured if any of the following conditions are true. If misconfigured then, stop and report "DDT entry misconfigured" (cause = 259):
+
+1. If any bits or encodings that are reserved for future standard use are set.
+2. `capabilities.ATS` is 0 and `DC.tc.EN_ATS`, or `DC.tc.EN_PRI`, or `DC.PRPR` is 1.
+3. `DC.tc.EN_ATS` is 0 and `DC.tc.T2GPA` is 1.
+4. `DC.tc.EN_ATS` is 0 and `DC.tc.EN_PRI` is 1.
+5. `DC.tc.EN_PRI` is 0 and `DC.tc.PRPR` is 1.
+6. `capabilities.T2GPA` is 0 and `DC.tc.T2GPA` is 1.
+7. `DC.tc.T2GPA` is 1 and `DC.iohgatp.MODE` is `Bare`.
+8. `DC.tc.PDTV` is 1 and `DC.fsc.pdtp.MODE` is not a supported mode:
+   1. `capabilities.PD20` is 0 and `DC.fsc.pdtp.MODE` is `PD20`.
+   2. `capabilities.PD17` is 0 and `DC.fsc.pdtp.MODE` is `PD17`.
+   3. `capabilities.PD8` is 0 and `DC.fsc.pdtp.MODE` is `PD8`.
+9. `DC.tc.PDTV` is 0 and `DC.fsc.iosatp.MODE` encoding is not a valid encoding as determined by Table 4 and Table 5.
+10. `DC.tc.PDTV` is 0 and `DC.tc.SXL` is 0 `DC.fsc.iosatp.MODE` is not one of the supported modes:
+    1. `capabilities.Sv39` is 0 and `DC.fsc.iosatp.MODE` is `Sv39`.
+    2. `capabilities.Sv48` is 0 and `DC.fsc.iosatp.MODE` is `Sv48`.
+    3. `capabilities.Sv57` is 0 and `DC.fsc.iosatp.MODE` is `Sv57`.
+11. `DC.tc.PDTV` is 0 and `DC.tc.SXL` is 1 `DC.fsc.iosatp.MODE` is not one of the supported modes:
+    1. `capabilities.Sv32` is 0 and `DC.fsc.iosatp.MODE` is `Sv32`.
+12. `DC.tc.PDTV` is 0 and `DC.tc.DPE` is 1.
+13. `DC.iohgatp.MODE` encoding is not a valid encoding as determined by Table 2 and Table 3.
+14. `fctl.GXL` is 0 and `DC.iohgatp.MODE` is not a supported mode:
+    1. `capabilities.Sv39x4` is 0 and `DC.iohgatp.MODE` is `Sv39x4`.
+    2. `capabilities.Sv48x4` is 0 and `DC.iohgatp.MODE` is `Sv48x4`.
+    3. `capabilities.Sv57x4` is 0 and `DC.iohgatp.MODE` is `Sv57x4`.
+15. `fctl.GXL` is 1 and `DC.iohgatp.MODE` is not a supported mode:
+    1. `capabilities.Sv32x4` is 0 and `DC.iohgatp.MODE` is `Sv32x4`.
+16. `capabilities.MSI_FLAT` is 1 and `DC.msiptp.MODE` is not `Off` and not `Flat`.
+17. `DC.iohgatp.MODE` is not `Bare` and the root page table determined by `DC.iohgatp.PPN` is not aligned to a 16-KiB boundary.
+18. `capabilities.AMO_HWAD` is 0 and `DC.tc.SADE` or `DC.tc.GADE` is 1.
+19. `capabilities.END` is 0 and `fctl.BE != DC.tc.SBE`.
+20. `DC.tc.SXL` value is not a legal value. If `fctl.GXL` is 1, then `DC.tc.SXL` must be 1. If `fctl.GXL` is 0 and is writable, then `DC.tc.SXL` may be 0 or 1. If `fctl.GXL` is 0 and is not writable then `DC.tc.SXL` must be 0.
+21. `DC.tc.SBE` value is not a legal value. If `fctl.BE` is writable then `DC.tc.SBE` may be 0 or 1. If `fctl.BE` is not writable then `DC.tc.SBE` must be the same as `fctl.BE`.
+22. `capabilities.QOSID` is 1 and `DC.ta.RCID` or `DC.ta.MCID` values are wider than that supported by the IOMMU.
+
+> **Notes:**
+> - Some `DC` fields hold supervisor physical addresses or guest physical addresses. Some implementations may verify the validity of the addresses - e.g. the supervisor physical address is not wider than that supported as determined by `capabilities.PAS`, etc. at the time of locating the `DC`. Such implementations may cause a "DDT entry misconfigured" (cause = 259) fault.
+> - Other implementations only detect such addresses to be invalid when the data structure referenced by these fields needs to be accessed. Such implementations may detect access-violation faults in the process of making the access.
+
+---
+
+## 3.2. Process-Directory-Table (PDT)
+
+The PDT is a 1, 2, or 3-level radix-tree indexed using the process directory index (PDI) bits of the `process_id`.
+
+The following diagrams illustrate the PDT radix-tree. The root process-directory page number is located using the process-directory-table pointer (`pdtp`) field of the device-context. Each non-leaf (`NL`) entry provides the PPN of the next level process-directory-table. The leaf process-directory-table entry holds the process-context (`PC`).
+
+### Figure 23. PDT walk — algorithmic reference
+
+(Replaces the visual figure with an unambiguous pseudocode + lookup table form. Faithful to spec §3.3.2.)
+
+#### PDT walk pseudocode
+
+```
+# ===== INPUT =====
+process_id     : 20-bit
+pdtp.PPN       : 44-bit  (= DC.fsc.PPN, present when DC.tc.PDTV == 1)
+pdtp.MODE      : {Bare, PD8, PD17, PD20}
+DC.iohgatp     : controls implicit GPA → SPA stage-2 translation
+
+# ===== PARAMETERS =====
+LEVELS = { PD8: 1, PD17: 2, PD20: 3 }[pdtp.MODE]    # Bare → no PDT walk
+PC_SIZE = 16                                         # bytes (process-context)
+
+# bit partition of process_id (always identical across modes;
+# unused upper bits must be 0 — see spec §3.3 step 7c)
+PDI[0] = process_id[7:0]                             # 8 bit
+PDI[1] = process_id[16:8]                            # 9 bit
+PDI[2] = process_id[19:17]                           # 3 bit
+
+# ===== process_id width check =====
+if LEVELS == 2 and PDI[2] != 0:                      fault(cause=260)
+if LEVELS == 1 and (PDI[2] != 0 or PDI[1] != 0):     fault(cause=260)
+
+# ===== WALK (spec §3.3.2) =====
+a = pdtp.PPN * 4096                                  # current page base
+i = LEVELS - 1
+
+# all PDT page accesses use IMPLICIT first-stage reads;
+# if S2 is enabled, every page address must be GPA → SPA translated first.
+if DC.iohgatp.MODE != Bare:
+    a = G_translate(a)                               # may fault: cause=265 (load access),
+                                                     #            cause=269 (data corruption),
+                                                     #            cause=21  (read guest-page fault)
+
+while i > 0:                                         # non-leaf levels
+    entry_addr = a + PDI[i] * 8
+    pdte       = read_LE_64bit(entry_addr)
+    if access_fault(entry_addr):    fault(cause=265) # PDT entry load access fault
+    if data_corruption(entry_addr): fault(cause=269) # PDT data corruption
+    if pdte.V == 0:                 fault(cause=266) # PDT entry not valid
+    if pdte.reserved != 0:          fault(cause=267) # PDT entry misconfigured
+    a = pdte.PPN * 4096
+    if DC.iohgatp.MODE != Bare:
+        a = G_translate(a)
+    i = i - 1
+
+# ===== LEAF level =====
+PC_addr = a + PDI[0] * 16
+PC      = read_LE_bytes(PC_addr, 16)
+if access_fault(PC_addr):    fault(cause=265)
+if data_corruption(PC_addr): fault(cause=269)
+if PC.ta.V == 0:             fault(cause=266)
+if misconfigured(PC):        fault(cause=267)        # see §3.2.4
 
-The msiptp.PPN field holds the PPN of the root MSI page table used to direct an MSI to a guest interrupt file in an IMSIC. The MSI page table formats are defined by the Advanced Interrupt Architecture specification.
+return PC
+```
 
-The msiptp.MODE field is used to select the MSI address translation scheme.
+#### Per-level reference table
 
-*Table 7. Encodings of* msiptp.MODE *field*
+| pdtp.MODE | Levels | Walk step (i) | Index used | Index bit slice | Index width | Page entry size | Entry address formula |
+| :-------- | :----: | :-----------: | :--------- | :-------------- | :---------: | :-------------: | :-------------------- |
+| **PD20**  | 3      | 2 (root)      | `PDI[2]`   | `process_id[19:17]` | 3 bit   | 8 B (non-leaf)  | `pdtp.PPN × 4096 + PDI[2] × 8`  (sparse: only 8 entries used) |
+| **PD20**  | 3      | 1             | `PDI[1]`   | `process_id[16:8]`  | 9 bit   | 8 B (non-leaf)  | `pdte_lv2.PPN × 4096 + PDI[1] × 8` |
+| **PD20**  | 3      | 0 (leaf)      | `PDI[0]`   | `process_id[7:0]`   | 8 bit   | **16 B (PC)**   | `pdte_lv1.PPN × 4096 + PDI[0] × 16` |
+| **PD17**  | 2      | 1 (root)      | `PDI[1]`   | `process_id[16:8]`  | 9 bit   | 8 B (non-leaf)  | `pdtp.PPN × 4096 + PDI[1] × 8` |
+| **PD17**  | 2      | 0 (leaf)      | `PDI[0]`   | `process_id[7:0]`   | 8 bit   | **16 B (PC)**   | `pdte_lv1.PPN × 4096 + PDI[0] × 16` |
+| **PD8**   | 1      | 0 (root=leaf) | `PDI[0]`   | `process_id[7:0]`   | 8 bit   | **16 B (PC)**   | `pdtp.PPN × 4096 + PDI[0] × 16` |
 
-| Value | Name | Description                                                                                                 |  |  |
-|-------|------|-------------------------------------------------------------------------------------------------------------|--|--|
-| 0     | Off  | Recognition of accesses to a virtual interrupt file using MSI address mask and pattern is not<br>performed. |  |  |
-| 1     | Flat | Flat MSI page table                                                                                         |  |  |
-| 2-13  | —    | Reserved for standard use.                                                                                  |  |  |
-| 14-15 | —    | Designated for custom use.                                                                                  |  |  |
+(For `PD17`: `process_id[19:17]` must be 0. For `PD8`: `process_id[19:8]` must be 0. Otherwise cause = 260.)
 
-### <span id="page-31-0"></span>3.1.3.6. MSI address mask (**msi\_addr\_mask**) and pattern (**msi\_addr\_pattern**)
+#### Notes on stage-2 translation of PDT page addresses
 
-![](_page_31_Figure_4.jpeg)
+When `DC.iohgatp.MODE != Bare`, every "page base address" listed above (`pdtp.PPN × 4096`, `pdte.PPN × 4096`) is a **GPA**, not an SPA. The IOMMU must first translate it through the second-stage page table (rooted at `DC.iohgatp`) before issuing the actual read for the PDT page. Faults during this implicit GPA → SPA translation are reported as:
 
-*Figure 21. MSI address mask (*msi\_addr\_mask*) field*
+| Stage-2 condition during PDT page access | Fault cause |
+| :--------------------------------------- | :---------- |
+| Access fault (PMA/PMP)                   | 265 (PDT entry load access fault) |
+| Data corruption (poisoned data)          | 269 (PDT data corruption) |
+| Guest-page fault (e.g. PTE.V=0 in S2)    | 21 (read guest-page fault) — original access type |
 
-![](_page_31_Figure_6.jpeg)
+Each non-leaf walk step within a non-Bare iohgatp setup therefore involves **one S2 walk + one PDT entry read**, multiplying the number of memory accesses by `(1 + S2_levels)`.
 
-*Figure 22. MSI address pattern (*msi\_addr\_pattern*) field*
+### 3.2.1. Non-leaf PDT entry
 
-The MSI address mask (msi\_addr\_mask) and pattern (msi\_addr\_pattern) fields are used to identify the 4- KiB pages of virtual interrupt files in the guest physical address space of the relevant VM. An incoming memory access made by a device is recognized as an access to a virtual interrupt file if the destination guest physical page matches the supplied address pattern in all bit positions that are zeros in the supplied address mask. In detail, a memory access to guest physical address A is recognized as an access to a virtual interrupt file's memory-mapped page if:
+A valid (`V==1`) non-leaf PDT entry holds the PPN of the next-level PDT.
 
-#### (A >> 12) & ~msi\_addr\_mask = (msi\_addr\_pattern & ~msi\_addr\_mask)
+**Figure 24. Non-leaf process-directory-table entry**
 
-where >> 12 represents shifting right by 12 bits, an ampersand (&) represents bitwise logical AND, and ~msi\_addr\_mask is the bitwise logical complement of the address mask.
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:54** | reserved |
+| **53:10** | PPN      |
+| **9:1**   | reserved |
+| **0**     | V        |
 
-While the MSI address mask and pattern fields are 52 bits wide, if , then bits are reserved for future standard use and must be set to zero by software. MGPAW is determined as follows:
+### 3.2.2. Leaf PDT entry
 
-- ⚫ If capabilities.Sv57x4 is 1, then MGPAW = 59
-- ⚫ Else if capabilities.Sv48x4 is 1, then MGPAW = 50
-- ⚫ Else if capabilities.Sv39x4 is 1, then MGPAW = 41
-- ⚫ Else if capabilities.Sv32x4 is 1, then MGPAW = 34
-- ⚫ Otherwise, MGPAW = capabilities.PAS
+The leaf PDT page is indexed by `PDI[0]` and holds the 16-byte process-context (`PC`).
 
-### <span id="page-31-1"></span>3.1.4. Device-context configuration checks
+**Figure 25. Process-context (16 byte = 2 doublewords)**
 
-A DC with DC.tc.V=1 is considered as misconfigured if any of the following conditions are true. If misconfigured then, stop and report "DDT entry misconfigured" (cause = 259).
+| Bits        | Field                          |
+| :---------- | :----------------------------- |
+| **127:64**  | First-stage-context (`fsc`)    |
+| **63:0**    | Translation-attributes (`ta`)  |
 
-- 1. If any bits or encodings that are reserved for future standard use are set.
-- 2. capabilities.ATS is 0 and DC.tc.EN\_ATS, or DC.tc.EN\_PRI, or DC.tc.PRPR is 1
-- 3. DC.tc.EN\_ATS is 0 and DC.tc.T2GPA is 1
-- 4. DC.tc.EN\_ATS is 0 and DC.tc.EN\_PRI is 1
-- 5. DC.tc.EN\_PRI is 0 and DC.tc.PRPR is 1
-- 6. capabilities.T2GPA is 0 and DC.tc.T2GPA is 1
-- 7. DC.tc.T2GPA is 1 and DC.iohgatp.MODE is Bare
-- 8. DC.tc.PDTV is 1 and DC.fsc.pdtp.MODE is not a supported mode
-  - a. capabilities.PD20 is 0 and DC.fsc.pdtp.MODE is PD20
-  - b. capabilities.PD17 is 0 and DC.fsc.pdtp.MODE is PD17
-  - c. capabilities.PD8 is 0 and DC.fsc.pdtp.MODE is PD8
-- 9. DC.tc.PDTV is 0 and DC.fsc.iosatp.MODE encoding is not a valid encoding as determined by [Table 4](#page-29-0) and [Table 5.](#page-29-1)
-- 10. DC.tc.PDTV is 0 and DC.tc.SXL is 0 DC.fsc.iosatp.MODE is not one of the supported modes
-  - a. capabilities.Sv39 is 0 and DC.fsc.iosatp.MODE is Sv39
-  - b. capabilities.Sv48 is 0 and DC.fsc.iosatp.MODE is Sv48
-  - c. capabilities.Sv57 is 0 and DC.fsc.iosatp.MODE is Sv57
-- 11. DC.tc.PDTV is 0 and DC.tc.SXL is 1 DC.fsc.iosatp.MODE is not one of the supported modes
-  - a. capabilities.Sv32 is 0 and DC.fsc.iosatp.MODE is Sv32
-- 12. DC.tc.PDTV is 0 and DC.tc.DPE is 1
-- 13. DC.iohgatp.MODE encoding is not a valid encoding as determined by [Table 2](#page-27-1) and [Table 3](#page-27-2).
-- 14. fctl.GXL is 0 and DC.iohgatp.MODE is not a supported mode
-  - a. capabilities.Sv39x4 is 0 and DC.iohgatp.MODE is Sv39x4
-  - b. capabilities.Sv48x4 is 0 and DC.iohgatp.MODE is Sv48x4
-  - c. capabilities.Sv57x4 is 0 and DC.iohgatp.MODE is Sv57x4
-- 15. fctl.GXL is 1 and DC.iohgatp.MODE is not a supported mode
-  - a. capabilities.Sv32x4 is 0 and DC.iohgatp.MODE is Sv32x4
-- 16. capabilities.MSI\_FLAT is 1 and DC.msiptp.MODE is not Off and not Flat
-- 17. DC.iohgatp.MODE is not Bare and the root page table determined by DC.iohgatp.PPN is not aligned to a 16-KiB boundary.
-- 18. capabilities.AMO\_HWAD is 0 and DC.tc.SADE or DC.tc.GADE is 1
-- 19. capabilities.END is 0 and fctl.BE != DC.tc.SBE
-- 20. DC.tc.SXL value is not a legal value. If fctl.GXL is 1, then DC.tc.SXL must be 1. If fctl.GXL is 0 and is writable, then DC.tc.SXL may be 0 or 1. If fctl.GXL is 0 and is not writable then DC.tc.SXL must be 0.
-- 21. DC.tc.SBE value is not a legal value. If fctl.BE is writable then DC.tc.SBE may be 0 or 1. If fctl.BE is not writable then DC.tc.SBE must be the same as fctl.BE.
-- 22. capabilities.QOSID is 1 and DC.ta.RCID or DC.ta.MCID values are wider than that supported by the IOMMU.
+The `PC` is interpreted as two 64-bit doublewords. The byte order of each of the doublewords in memory, little-endian or big-endian, is the endianness as determined by `DC.tc.SBE`. The IOMMU may read the `PC` fields in any order.
 
-*Some* DC *fields hold supervisor physical addresses or guest physical addresses. Some*
+### 3.2.3. Process-context fields
 
-*implementations may verify the validity of the addresses - e.g. the supervisor physical address is not wider than that supported as determined by* capabilities.PAS*, etc. at the time of locating the* DC*. Such implementations may cause a "DDT entry misconfigured" (cause = 259) fault.*
+#### 3.2.3.1. Translation attributes (`ta`)
 
-*Other implementations only detect such addresses to be invalid when the data structure referenced by these fields needs to be accessed. Such implementations may detect accessviolation faults in the process of making the access.*
+**Figure 26. Translation attributes (`ta`) field**
 
-# <span id="page-33-0"></span>3.2. Process-Directory-Table (PDT)
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:32** | reserved |
+| **31:12** | PSCID    |
+| **11:3**  | reserved |
+| **2**     | SUM      |
+| **1**     | ENS      |
+| **0**     | V        |
 
-The PDT is a 1, 2, or 3-level radix-tree indexed using the process directory index (PDI) bits of the process\_id.
+`PC` is valid if the `V` bit is 1; If it is 0, all other bits in `PC` are don't care and may be freely used by software.
 
-The following diagrams illustrate the PDT radix-tree. The root process-directory page number is located using the process-directory-table pointer (pdtp) field of the device-context. Each non-leaf (NL) entry provides the PPN of the next level process-directory-table. The leaf process-directory-table entry holds the process-context (PC).
+When Enable-Supervisory-access (`ENS`) is 1, transactions requesting supervisor privilege are allowed with this `process_id` else the transaction is treated as an unsupported request.
 
-![](_page_33_Picture_6.jpeg)
+When `ENS` is 1, the `SUM` (permit Supervisor User Memory access) bit modifies the privilege with which supervisor privilege transactions access virtual memory. When `SUM` is 0, supervisor privilege transactions to pages mapped with `U` bit in PTE set to 1 are disallowed.
 
-*Figure 23. Three, two and single-level process directory*
+When `ENS` is 1, supervisor privilege transactions that read with execute intent to pages mapped with `U` bit in PTE set to 1 are disallowed, regardless of the value of `SUM`.
 
-#### <span id="page-33-1"></span>3.2.1. Non-leaf PDT entry
+The software assigned process soft-context ID (`PSCID`) is used as the address space ID for the process identified by the first-stage page table when first-stage address translation is not Bare.
 
-A valid (V==1) non-leaf PDT entry holds the PPN of the next-level PDT.
+#### 3.2.3.2. First-Stage context (`fsc`)
 
-![](_page_33_Figure_10.jpeg)
+**Figure 27. Process First-Stage context (`fsc`)**
 
-*Figure 24. Non-leaf process-directory-table entry*
+| Bits      | Field    |
+| :-------- | :------- |
+| **63:60** | MODE     |
+| **59:44** | reserved |
+| **43:0**  | PPN      |
 
-#### <span id="page-33-2"></span>3.2.2. Leaf PDT entry
+The `PC.fsc` field provides the controls for first-stage address translation and protection.
 
-The leaf PDT page is indexed by PDI[0] and holds the 16-byte process-context (PC).
+The `PC.fsc.MODE` is used to determine the first-stage paged virtual-memory scheme and its encodings are as defined in Table 4 and Table 5. The `DC.tc.SXL` field controls the supported paged virtual-memory schemes. When `PC.fsc.MODE` is not Bare, the `PC.fsc.PPN` field holds the PPN of the root page of a first-stage page table.
 
-![](_page_34_Figure_1.jpeg)
+When second-stage address translation is not Bare, the `PC.fsc.PPN` field holds a guest PPN of the root of a first-stage page table. Addresses of the first-stage page table entries are then converted by guest physical address translation process, as controlled by the `DC.iohgatp`, into a supervisor physical address. A guest OS may thus directly edit the first-stage page table to limit access by the device to a subset of its memory and specify permissions for the device accesses.
 
-*Figure 25. Process-context*
+> **Note**: The `PC.ta.PSCID` identifies an address space. If an identical `PSCID` is configured in two `PC` when the page-table referenced by the two `PC` are not identical then it is unpredictable whether the IOMMU uses the PTEs from the first page table or the second page table. These are the only expected behaviors.
 
-The PC is interpreted as two 64-bit doublewords. The byte order of each of the doublewords in memory, little-endian or big-endian, is the endianness as determined by DC.tc.SBE. The IOMMU may read the PC fields in any order.
+### 3.2.4. Process-context configuration checks
 
-### <span id="page-34-0"></span>3.2.3. Process-context fields
+A `PC` with `PC.ta.V=1` is considered as misconfigured if any of the following conditions are true. If misconfigured then stop and report "PDT entry misconfigured" (cause = 267):
 
-#### <span id="page-34-1"></span>3.2.3.1. Translation attributes (**ta**)
+1. If any bits or encoding that are reserved for future standard use are set.
+2. `PC.fsc.MODE` encoding is not valid as determined by Table 4 and Table 5.
+3. `DC.tc.SXL` is 0 and `PC.fsc.MODE` is not one of the supported modes:
+    1. `capabilities.Sv39` is 0 and `PC.fsc.MODE` is `Sv39`.
+    2. `capabilities.Sv48` is 0 and `PC.fsc.MODE` is `Sv48`.
+    3. `capabilities.Sv57` is 0 and `PC.fsc.MODE` is `Sv57`.
+4. `DC.tc.SXL` is 1 and `PC.fsc.MODE` is not one of the supported modes:
+    1. `capabilities.Sv32` is 0 and `PC.fsc.MODE` is `Sv32`.
 
-![](_page_34_Figure_6.jpeg)
+> **Notes:**
+> - Some `PC` fields hold supervisor physical addresses or guest physical addresses. Some implementations may verify the validity of the addresses - e.g. the supervisor physical address is not wider than that supported as determined by `capabilities.PAS`, etc. at the time of locating the `PC`. Such implementations may cause a "PDT entry misconfigured" (cause = 267) fault.
+> - Other implementations only detect such addresses to be invalid when the data structure referenced by these fields needs to be accessed. Such implementations may detect access-violation faults in the process of making the access.
 
-*Figure 26. Translation attributes (*ta*) field*
+---
 
-PC is valid if the V bit is 1; If it is 0, all other bits in PC are don't care and may be freely used by software.
+## 3.3. Process to translate an IOVA
 
-When Enable-Supervisory-access (ENS) is 1, transactions requesting supervisor privilege are allowed with this process\_id else the transaction is treated as an unsupported request.
+The process to translate an IOVA uses the hardware IDs (`device_id` and `process_id`) to locate the Device-Context and the Process-Context. The Device-context and Process-context provide the root PPN of the page tables, `PSCID`, `GSCID`, and other control parameters that affect the address translation and protection process. When address translation caches (Section 3.8) are implemented, the translation process may use the `GSCID` and `PSCID` to associate the cached translations with their address spaces.
 
-When ENS is 1, the SUM (permit Supervisor User Memory access) bit modifies the privilege with which supervisor privilege transactions access virtual memory. When SUM is 0, supervisor privilege transactions to pages mapped with U bit in PTE set to 1 are disallowed.
+The process to translate an `IOVA` is as follows:
 
-When ENS is 1, supervisor privilege transactions that read with execute intent to pages mapped with U bit in PTE set to 1 are disallowed, regardless of the value of SUM.
+1. If `ddtp.iommu_mode == Off` then stop and report "All inbound transactions disallowed" (cause = 256).
 
-The software assigned process soft-context ID (PSCID) is used as the address space ID for the process identified by the first-stage page table when first-stage address translation is not Bare.
+2. If `ddtp.iommu_mode == Bare` and any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260); else go to step 20 with translated address same as the `IOVA`.
+    1. Transaction type is a Translated request (read, write/AMO, read-for-execute) or is a PCIe ATS Translation request.
 
-#### <span id="page-34-2"></span>3.2.3.2. First-Stage context (**fsc**)
+3. If `capabilities.MSI_FLAT` is 0 then the IOMMU uses base-format device context. Let `DDI[0]` be `device_id[6:0]`, `DDI[1]` be `device_id[15:7]`, and `DDI[2]` be `device_id[23:16]`.
 
-![](_page_34_Figure_14.jpeg)
+4. If `capabilities.MSI_FLAT` is 1 then the IOMMU uses extended-format device context. Let `DDI[0]` be `device_id[5:0]`, `DDI[1]` be `device_id[14:6]`, and `DDI[2]` be `device_id[23:15]`.
 
-*Figure 27. Process First-Stage context*
+5. If the `device_id` is wider than that supported by the IOMMU mode, as determined by the following checks then stop and report "Transaction type disallowed" (cause = 260):
+    1. `ddtp.iommu_mode` is `2LVL` and `DDI[2]` is not 0.
+    2. `ddtp.iommu_mode` is `1LVL` and either `DDI[2]` is not 0 or `DDI[1]` is not 0.
 
-The PC.fsc field provides the controls for first-stage address translation and protection.
+6. Use `device_id` to then locate the device-context (`DC`) as specified in Section 3.3.1.
 
-The PC.fsc.MODE is used to determine the first-stage paged virtual-memory scheme and its encodings are as defined in [Table 4](#page-29-0) and [Table 5.](#page-29-1) The DC.tc.SXL field controls the supported paged virtual-memory schemes. When PC.fsc.MODE is not Bare, the PC.fsc.PPN field holds the PPN of the root page of a firststage page table.
+7. If any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260):
+    1. Transaction type is a Translated request (read, write/AMO, read-for-execute) or is a PCIe ATS Translation request and `DC.tc.EN_ATS` is 0.
+    2. Transaction has a valid `process_id` and `DC.tc.PDTV` is 0.
+    3. Transaction has a valid `process_id` and `DC.tc.PDTV` is 1 and the `process_id` is wider than that supported by `pdtp.MODE`.
+    4. Transaction type is not supported by the IOMMU.
 
-When second-stage address translation is not Bare, the PC.fsc.PPN field holds a guest PPN of the root of a first-stage page table. Addresses of the first-stage page table entries are then converted by guest physical address translation process, as controlled by the DC.iohgatp, into a supervisor physical address. A guest OS may thus directly edit the first-stage page table to limit access by the device to a subset of its memory and specify permissions for the device accesses.
+8. If request is a Translated request and `DC.tc.T2GPA` is 0 then the translation process is complete. Go to step 20.
 
-![](_page_35_Picture_3.jpeg)
+9. If request is a Translated request and `DC.tc.T2GPA` is 1 then the IOVA is a GPA. Go to step 17 with following page table information:
+    1. Let `A` be the IOVA (the IOVA is a GPA).
+    2. Let `iosatp.MODE` be `Bare` (The `PSCID` value is not used when first-stage is Bare).
+    3. Let `iohgatp` be the value in the `DC.iohgatp` field.
 
-*The* PC.ta.PSCID *identifies an address space. If an identical* PSCID *is configured in two* PC *when the page-table referenced by the two* PC *are not identical then it is unpredictable whether the IOMMU uses the PTEs from the first page table or the second page table. These are the only expected behaviors.*
+10. If `DC.tc.PDTV` is set to 0 then go to step 17 with the following page table information:
+    1. Let `iosatp.MODE` be the value in the `DC.fsc.MODE` field.
+    2. Let `iosatp.PPN` be the value in the `DC.fsc.PPN` field.
+    3. Let `PSCID` be the value in the `DC.ta.PSCID` field.
+    4. Let `iohgatp` be the value in the `DC.iohgatp` field.
 
-### <span id="page-35-0"></span>3.2.4. Process-context configuration checks
+11. If `DPE` is 1 and there is no `process_id` associated with the transaction then let `process_id` be the default value of 0.
 
-A PC with PC.ta.V=1 is considered as misconfigured if any of the following conditions are true. If misconfigured then stop and report "PDT entry misconfigured" (cause = 267).
+12. If `DPE` is 0 and there is no `process_id` associated with the transaction then go to step 17 with the following page table information:
+    1. Let `iosatp.MODE` be `Bare` (The `PSCID` value is not used when first-stage is Bare).
+    2. Let `iohgatp` be the value in the `DC.iohgatp` field.
 
-- 1. If any bits or encoding that are reserved for future standard use are set
-- 2. PC.fsc.MODE encoding is not valid as determined by [Table 4](#page-29-0) and [Table 5](#page-29-1).
-- 3. DC.tc.SXL is 0 and PC.fsc.MODE is not one of the supported modes
-  - a. capabilities.Sv39 is 0 and PC.fsc.MODE is Sv39
-  - b. capabilities.Sv48 is 0 and PC.fsc.MODE is Sv48
-  - c. capabilities.Sv57 is 0 and PC.fsc.MODE is Sv57
-- 4. DC.tc.SXL is 1 and PC.fsc.MODE is not one of the supported modes
-  - a. capabilities.Sv32 is 0 and PC.fsc.MODE is Sv32
+13. If `DC.fsc.pdtp.MODE = Bare` then go to step 17 with the following page table information:
+    1. Let `iosatp.MODE` be `Bare` (The `PSCID` value is not used when first-stage is Bare).
+    2. Let `iohgatp` be value in `DC.iohgatp` field.
 
-![](_page_36_Picture_1.jpeg)
+14. Locate the process-context (`PC`) as specified in Section 3.3.2.
 
-*Some* PC *fields hold supervisor physical addresses or guest physical addresses. Some implementations may verify the validity of the addresses - e.g. the supervisor physical address is not wider than that supported as determined by* capabilities.PAS*, etc. at the time of locating the* PC*. Such implementations may cause a "PDT entry misconfigured" (cause = 267) fault.*
+15. If any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260):
+    1. The transaction requests supervisor privilege but `PC.ta.ENS` is not set.
 
-*Other implementations only detect such addresses to be invalid when the data structure referenced by these fields needs to be accessed. Such implementations may detect accessviolation faults in the process of making the access.*
+16. Go to step 17 with the following page table information:
+    1. Let `iosatp.MODE` be the value in the `PC.fsc.MODE` field.
+    2. Let `iosatp.PPN` be the value in the `PC.fsc.PPN` field.
+    3. Let `PSCID` be the value in the `PC.ta.PSCID` field.
+    4. Let `iohgatp` be the value in the `DC.iohgatp` field.
 
-# <span id="page-36-0"></span>3.3. Process to translate an IOVA
+17. Use the process specified in Section "Two-Stage Address Translation" of the RISC-V Privileged specification to determine the GPA accessed by the transaction. If a fault is detected by the first stage address translation process then stop and report the fault. If the translation process is completed successfully then let `A` be the translated GPA.
 
-The process to translate an IOVA uses the hardware IDs (device\_id and process\_id) to locate the Device-Context and the Process-Context. The Device-context and Process-context provide the root PPN of the page tables, PSCID, GSCID, and other control parameters that affect the address translation and protection process. When address translation caches [\(Section 3.8\)](#page-46-0) are implemented, the translation process may use the GSCID and PSCID to associate the cached translations with their address spaces.
+18. If MSI address translations using MSI page tables is enabled (i.e., `DC.msiptp.MODE != Off`) then the MSI address translation process specified in Section 3.3.3 is invoked. If the GPA `A` is not determined to be the address of a virtual interrupt file then the process continues at step 19. If a fault is detected by the MSI address translation process then stop and report the fault else the process continues at step 20.
 
-The process to translate an IOVA is as follows:
+19. Use the second-stage address translation process specified in Section "Two-Stage Address Translation" of the RISC-V Privileged specification to translate the GPA `A` to determine the SPA accessed by the transaction. If a fault is detected by the address translation process then stop and report the fault.
 
-- 1. If ddtp.iommu\_mode == Off then stop and report "All inbound transactions disallowed" (cause = 256).
-- 2. If ddtp.iommu\_mode == Bare and any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260); else go to step 20 with translated address same as the IOVA.
-  - a. Transaction type is a Translated request (read, write/AMO, read-for-execute) or is a PCIe ATS Translation request.
-- 3. If capabilities.MSI\_FLAT is 0 then the IOMMU uses base-format device context. Let DDI[0] be device\_id[6:0], DDI[1] be device\_id[15:7], and DDI[2] be device\_id[23:16].
-- 4. If capabilities.MSI\_FLAT is 1 then the IOMMU uses extended-format device context. Let DDI[0] be device\_id[5:0], DDI[1] be device\_id[14:6], and DDI[2] be device\_id[23:15].
-- 5. If the device\_id is wider than that supported by the IOMMU mode, as determined by the following checks then stop and report "Transaction type disallowed" (cause = 260).
-  - a. ddtp.iommu\_mode is 2LVL and DDI[2] is not 0
-  - b. ddtp.iommu\_mode is 1LVL and either DDI[2] is not 0 or DDI[1] is not 0
-- 6. Use device\_id to then locate the device-context (DC) as specified in [Section 3.3.1](#page-38-0).
-- 7. If any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260).
-  - a. Transaction type is a Translated request (read, write/AMO, read-for-execute) or is a PCIe ATS Translation request and DC.tc.EN\_ATS is 0.
-  - b. Transaction has a valid process\_id and DC.tc.PDTV is 0.
-  - c. Transaction has a valid process\_id and DC.tc.PDTV is 1 and the process\_id is wider than that supported by pdtp.MODE.
-  - d. Transaction type is not supported by the IOMMU.
-- 8. If request is a Translated request and DC.tc.T2GPA is 0 then the translation process is complete. Go to step 20.
-- 9. If request is a Translated request and DC.tc.T2GPA is 1 then the IOVA is a GPA. Go to step 17 with following page table information:
+20. Translation process is complete.
 
-- a. Let A be the IOVA (the IOVA is a GPA).
-- b. Let iosatp.MODE be Bare
-  - i. The PSCID value is not used when first-stage is Bare.
-- c. Let iohgatp be the value in the DC.iohgatp field
-- 10. If DC.tc.PDTV is set to 0 then go to step 17 with the following page table information:
-  - a. Let iosatp.MODE be the value in the DC.fsc.MODE field
-  - b. Let iosatp.PPN be the value in the DC.fsc.PPN field
-  - c. Let PSCID be the value in the DC.ta.PSCID field
-  - d. Let iohgatp be the value in the DC.iohgatp field
-- 11. If DPE is 1 and there is no process\_id associated with the transaction then let process\_id be the default value of 0.
-- 12. If DPE is 0 and there is no process\_id associated with the transaction then then go to step 17 with the following page table information:
-  - a. Let iosatp.MODE be Bare
-    - i. The PSCID value is not used when first-stage is Bare.
-  - b. Let iohgatp be the value in the DC.iohgatp field
-- 13. If DC.fsc.pdtp.MODE = Bare then go to step 17 with the following page table information:
-  - a. Let iosatp.MODE be Bare
-    - i. The PSCID value is not used when first-stage is Bare.
-  - b. Let iohgatp be value in DC.iohgatp field
-- 14. Locate the process-context (PC) as specified in [Section 3.3.2.](#page-38-1)
-- 15. if any of the following conditions hold then stop and report "Transaction type disallowed" (cause = 260).
-  - a. The transaction requests supervisor privilege but PC.ta.ENS is not set.
-- 16. Go to step 17 with the following page table information:
-  - a. Let iosatp.MODE be the value in the PC.fsc.MODE field
-  - b. Let iosatp.PPN be the value in the PC.fsc.PPN field
-  - c. Let PSCID be the value in the PC.ta.PSCID field
-  - d. Let iohgatp be the value in the DC.iohgatp field
-- 17. Use the process specified in Section "Two-Stage Address Translation" of the RISC-V Privileged specification [[6](#page-106-6)] to determine the GPA accessed by the transaction. If a fault is detected by the first stage address translation process then stop and report the fault. If the translation process is completed successfully then let A be the translated GPA.
-- 18. If MSI address translations using MSI page tables is enabled (i.e., DC.msiptp.MODE != Off) then the MSI address translation process specified in [Section 3.3.3](#page-39-0) is invoked. If the GPA A is not determined to be the address of a virtual interrupt file then the process continues at step 19. If a fault is detected by the MSI address translation process then stop and report the fault else the process continues at step 20.
-- 19. Use the second-stage address translation process specified in Section "Two-Stage Address Translation" of the RISC-V Privileged specification [[6\]](#page-106-6) to translate the GPA A to determine the SPA accessed by the transaction. If a fault is detected by the address translation process then stop and report the fault.
-- 20. Translation process is complete
+When checking the `U` bit in a second-stage PTE, the transaction is treated as not requesting supervisor privilege. The `pte.xwr=010` encoding, as specified by the Zicfiss extension for the Shadow Stack page type in single-stage and VS-stage page tables, remains a reserved encoding for IO transactions.
 
-When checking the U bit in a second-stage PTE, the transaction is treated as not requesting supervisor privilege. The pte.xwr=010 encoding, as specified by the Zicfiss [\[7](#page-106-7)] extension for the Shadow Stack page type in single-stage and VS-stage page tables, remains a reserved encoding for IO transactions.
+When the translation process reports a fault, and the request is an Untranslated request or a Translated request, the IOMMU requests the IO bridge to abort the transaction. Guidelines for handling faulting transactions in the IO bridge are provided in Section 8.3. The fault may be reported using the fault/event reporting mechanism and fault record formats specified in Section 4.2.
 
-When the translation process reports a fault, and the request is an Untranslated request or a Translated request, the IOMMU requests the IO bridge to abort the transaction. Guidelines for handling faulting transactions in the IO bridge are provided in [Section 8.3.](#page-98-3) The fault may be reported using the fault/event reporting mechanism and fault record formats specified in [Section 4.2](#page-56-0).
+If the fault was detected by a PCIe ATS Translation Request then the IOMMU may provide a PCIe protocol defined response instead of reporting fault to software or causing an abort. The handling of faulting PCIe ATS Translation Requests is specified in Section 3.6.
 
-If the fault was detected by a PCIe ATS Translation Request then the IOMMU may provide a PCIe protocol defined response instead of reporting fault to software or causing an abort. The handling of faulting PCIe ATS Translation Requests is specified in [Section 3.6](#page-42-1).
+### 3.3.1. Process to locate the Device-context
 
-### <span id="page-38-0"></span>3.3.1. Process to locate the Device-context
+The process to locate the Device-context for transaction using its `device_id` is as follows:
 
-The process to locate the Device-context for transaction using its device\_id is as follows:
+1. Let `a` be `ddtp.PPN × 2^12` and let `i = LEVELS - 1`. When `ddtp.iommu_mode` is `3LVL`, `LEVELS` is three. When `ddtp.iommu_mode` is `2LVL`, `LEVELS` is two. When `ddtp.iommu_mode` is `1LVL`, `LEVELS` is one.
 
-- 1. Let a be ddtp.PPN x 2<sup>12</sup> and let i = LEVELS 1. When ddtp.iommu\_mode is 3LVL, LEVELS is three. When ddtp.iommu\_mode is 2LVL, LEVELS is two. When ddtp.iommu\_mode is 1LVL, LEVELS is one.
-- 2. If i == 0 go to step 8.
-- 3. Let ddte be the value of the eight bytes at address a + DDI[i] x 8. If accessing ddte violates a PMA or PMP check, then stop and report "DDT entry load access fault" (cause = 257).
-- 4. If ddte access detects a data corruption (a.k.a. poisoned data), then stop and report "DDT data corruption" (cause = 268).
-- 5. If ddte.V == 0, stop and report "DDT entry not valid" (cause = 258).
-- 6. If any bits or encoding that are reserved for future standard use are set within ddte, stop and report "DDT entry misconfigured" (cause = 259).
-- 7. Let i = i 1 and let a = ddte.PPN x 2<sup>12</sup>. Go to step 2.
-- 8. Let DC be the value of DC\_SIZE bytes at address a + DDI[0] \* DC\_SIZE. If capabilities.MSI\_FLAT is 1 then DC\_SIZE is 64-bytes else it is 32-bytes. If accessing DC violates a PMA or PMP check, then stop and report "DDT entry load access fault" (cause = 257). If DC access detects a data corruption (a.k.a. poisoned data), then stop and report "DDT data corruption" (cause = 268).
-- 9. If DC.tc.V == 0, stop and report "DDT entry not valid" (cause = 258).
-- 10. If the DC is misconfigured as determined by rules outlined in [Section 3.1.4](#page-31-1) then stop and report "DDT entry misconfigured" (cause = 259).
-- 11. The device-context has been successfully located.
+2. If `i == 0` go to step 8.
 
-#### <span id="page-38-1"></span>3.3.2. Process to locate the Process-context
+3. Let `ddte` be the value of the eight bytes at address `a + DDI[i] × 8`. If accessing `ddte` violates a PMA or PMP check, then stop and report "DDT entry load access fault" (cause = 257).
 
-The device-context provides the PDT root page PPN (pdtp.ppn). When DC.iohgatp.mode is not Bare, pdtp.PPN as well as pdte.PPN are Guest Physical Addresses (GPA) which must be translated into Supervisor Physical Addresses (SPA) using the second-stage page table pointed to by DC.iohgatp. The memory accesses to the PDT are treated as implicit read memory accesses by the second-stage. However, any guestpage fault exception raised by the second stage is always reported using the original access type (instruction, load, or store/AMO). An access fault in the second stage is reported as "PDT entry load access fault" (cause = 265). If the second-stage accesses detect data corruption (i.e., poisoned data), it is reported as "PDT data corruption" (cause = 269).
+4. If `ddte` access detects a data corruption (a.k.a. poisoned data), then stop and report "DDT data corruption" (cause = 268).
 
-The process to locate the Process-context for a transaction using its process\_id is as follows:
+5. If `ddte.V == 0`, stop and report "DDT entry not valid" (cause = 258).
 
-- 1. Let a be pdtp.PPN x 2<sup>12</sup> and let i = LEVELS 1. When pdtp.MODE is PD20, LEVELS is three. When pdtp.MODE is PD17, LEVELS is two. When pdtp.MODE is PD8, LEVELS is one.
-- 2. If DC.iohgatp.mode != Bare, then a is a GPA. Invoke the process to translate a to a SPA as an implicit memory access. If faults occur during second-stage address translation of a then stop and report the fault detected by the second-stage address translation process. The translated a is used in subsequent steps.
-- 3. If i == 0 go to step 9.
-- 4. Let pdte be the value of the eight bytes at address a + PDI[i] x 8. If accessing pdte violates a PMA or PMP check, then stop and report "PDT entry load access fault" (cause = 265).
-- 5. If pdte access detects a data corruption (a.k.a. poisoned data), then stop and report "PDT data corruption" (cause = 269).
-- 6. If pdte.V == 0, stop and report "PDT entry not valid" (cause = 266).
-- 7. If any bits or encoding that are reserved for future standard use are set within pdte, stop and report "PDT entry misconfigured" (cause = 267).
-- 8. Let i = i 1 and let a = pdte.PPN x 2<sup>12</sup>. Go to step 2.
-- 9. Let PC be the value of the 16-bytes at address a + PDI[0] x 16. If accessing PC violates a PMA or PMP check, then stop and report "PDT entry load access fault" (cause = 265). If PC access detects a data corruption (a.k.a. poisoned data), then stop and report "PDT data corruption" (cause = 269).
-- 10. If PC.ta.V == 0, stop and report "PDT entry not valid" (cause = 266).
-- 11. If the PC is misconfigured as determined by rules outlined in [Section 3.2.4](#page-35-0) then stop and report "PDT entry misconfigured" (cause = 267).
-- 12. The Process-context has been successfully located.
+6. If any bits or encoding that are reserved for future standard use are set within `ddte`, stop and report "DDT entry misconfigured" (cause = 259).
 
-#### <span id="page-39-0"></span>3.3.3. Process to translate addresses of MSIs
+7. Let `i = i - 1` and let `a = ddte.PPN × 2^12`. Go to step 2.
+
+8. Let `DC` be the value of `DC_SIZE` bytes at address `a + DDI[0] × DC_SIZE`. If `capabilities.MSI_FLAT` is 1 then `DC_SIZE` is 64-bytes else it is 32-bytes. If accessing `DC` violates a PMA or PMP check, then stop and report "DDT entry load access fault" (cause = 257). If `DC` access detects a data corruption (a.k.a. poisoned data), then stop and report "DDT data corruption" (cause = 268).
+
+9. If `DC.tc.V == 0`, stop and report "DDT entry not valid" (cause = 258).
+
+10. If the `DC` is misconfigured as determined by rules outlined in Section 3.1.4 then stop and report "DDT entry misconfigured" (cause = 259).
+
+11. The device-context has been successfully located.
+
+### 3.3.2. Process to locate the Process-context
+
+The device-context provides the PDT root page PPN (`pdtp.ppn`). When `DC.iohgatp.mode` is not `Bare`, `pdtp.PPN` as well as `pdte.PPN` are Guest Physical Addresses (GPA) which must be translated into Supervisor Physical Addresses (SPA) using the second-stage page table pointed to by `DC.iohgatp`. The memory accesses to the PDT are treated as implicit read memory accesses by the second-stage. However, any guest-page fault exception raised by the second stage is always reported using the original access type (instruction, load, or store/AMO). An access fault in the second stage is reported as "PDT entry load access fault" (cause = 265). If the second-stage accesses detect data corruption (i.e., poisoned data), it is reported as "PDT data corruption" (cause = 269).
+
+The process to locate the Process-context for a transaction using its `process_id` is as follows:
+
+1. Let `a` be `pdtp.PPN × 2^12` and let `i = LEVELS - 1`. When `pdtp.MODE` is `PD20`, `LEVELS` is three. When `pdtp.MODE` is `PD17`, `LEVELS` is two. When `pdtp.MODE` is `PD8`, `LEVELS` is one.
+
+2. If `DC.iohgatp.mode != Bare`, then `a` is a GPA. Invoke the process to translate `a` to a SPA as an implicit memory access. If faults occur during second-stage address translation of `a` then stop and report the fault detected by the second-stage address translation process. The translated `a` is used in subsequent steps.
+
+3. If `i == 0` go to step 9.
+
+4. Let `pdte` be the value of the eight bytes at address `a + PDI[i] × 8`. If accessing `pdte` violates a PMA or PMP check, then stop and report "PDT entry load access fault" (cause = 265).
+
+5. If `pdte` access detects a data corruption (a.k.a. poisoned data), then stop and report "PDT data corruption" (cause = 269).
+
+6. If `pdte.V == 0`, stop and report "PDT entry not valid" (cause = 266).
+
+7. If any bits or encoding that are reserved for future standard use are set within `pdte`, stop and report "PDT entry misconfigured" (cause = 267).
+
+8. Let `i = i - 1` and let `a = pdte.PPN × 2^12`. Go to step 2.
+
+9. Let `PC` be the value of the 16-bytes at address `a + PDI[0] × 16`. If accessing `PC` violates a PMA or PMP check, then stop and report "PDT entry load access fault" (cause = 265). If `PC` access detects a data corruption (a.k.a. poisoned data), then stop and report "PDT data corruption" (cause = 269).
+
+10. If `PC.ta.V == 0`, stop and report "PDT entry not valid" (cause = 266).
+
+11. If the `PC` is misconfigured as determined by rules outlined in Section 3.2.4 then stop and report "PDT entry misconfigured" (cause = 267).
+
+12. The Process-context has been successfully located.
+
+### 3.3.3. Process to translate addresses of MSIs
 
 When an I/O device is configured directly by a guest operating system, MSIs from the device are expected to be targeted to virtual IMSICs within the guest OS's virtual machine, using guest physical addresses that are inappropriate and unsafe for the real machine. An IOMMU must recognize certain incoming writes from such devices as MSIs and convert them as needed for the real machine.
 
-MSIs originating from a single device that require conversion are expected to have been configured at the device by a single guest OS running within one RISC-V virtual machine. Assuming the VM itself conforms to the RISC-V Advanced Interrupt Architecture [\[5](#page-106-5)], MSIs are sent to virtual harts within the VM by writing to the memory-mapped registers of the interrupt files of virtual IMSICs. Each of these virtual interrupt files occupies a separate 4-KiB page in the VM's guest physical address space, the same as real interrupt files do in a real machine's physical address space. A write to a guest physical address can thus be recognized as an MSI to a virtual hart if the write is to a page occupied by an interrupt file of a virtual IMSIC within the VM.
+MSIs originating from a single device that require conversion are expected to have been configured at the device by a single guest OS running within one RISC-V virtual machine. Assuming the VM itself conforms to the RISC-V Advanced Interrupt Architecture, MSIs are sent to virtual harts within the VM by writing to the memory-mapped registers of the interrupt files of virtual IMSICs. Each of these virtual interrupt files occupies a separate 4-KiB page in the VM's guest physical address space, the same as real interrupt files do in a real machine's physical address space. A write to a guest physical address can thus be recognized as an MSI to a virtual hart if the write is to a page occupied by an interrupt file of a virtual IMSIC within the VM.
 
-When MSI address translation is supported (capabilities.MSI\_FLAT, [Section 6.3](#page-63-1)), the process to identify an incoming IOVA as the address of a virtual interrupt file and translating the address using the MSI page table is as follows:
+When MSI address translation is supported (`capabilities.MSI_FLAT`, Section 6.3), the process to identify an incoming `IOVA` as the address of a virtual interrupt file and translating the address using the MSI page table is as follows:
 
-- 1. Let A be the GPA
-- 2. Let DC be the device-context located using the device\_id of the device using the process outlined in [Section 3.3.1](#page-38-0).
-- 3. Determine if the address A is an access to a virtual interrupt file as specified in [Section 3.1.3.6](#page-31-0).
-- 4. If the address is not determined to be that of a virtual interrupt file then stop this process and instead
+1. Let `A` be the GPA.
+2. Let `DC` be the device-context located using the `device_id` of the device using the process outlined in Section 3.3.1.
+3. Determine if the address `A` is an access to a virtual interrupt file as specified in Section 3.1.3.6.
+4. If the address is not determined to be that of a virtual interrupt file then stop this process and instead use the regular translation data structures to do the address translation.
+5. Extract an interrupt file number `I` from `A` as `I = extract(A >> 12, DC.msi_addr_mask)`. The bit extract function `extract(x, y)` discards all bits from `x` whose matching bits in the same positions in the mask `y` are zeros, and packs the remaining bits from `x` contiguously at the least-significant end of the result, keeping the same bit order as `x` and filling any other bits at the most-significant end of the result with zeros. For example, if the bits of `x` and `y` are:
+    - `x = a b c d e f g h`
+    - `y = 1 0 1 0 0 1 1 0`
+    - then the value of `extract(x, y)` has bits `0 0 0 0 a c f g`.
 
-use the regular translation data structures to do the address translation.
+6. Let `m` be `(DC.msiptp.PPN × 2^12)`.
 
-- 5. Extract an interrupt file number I from A as I = extract(A >> 12, DC.msi\_addr\_mask). The bit extract function extract(x, y) discards all bits from x whose matching bits in the same positions in the mask y are zeros, and packs the remaining bits from x contiguously at the least-significant end of the result, keeping the same bit order as x and filling any other bits at the most-significant end of the result with zeros. For example, if the bits of x and y are:
-  - ⚫ x = a b c d e f g h
-  - ⚫ y = 1 0 1 0 0 1 1 0
-  - ⚫ then the value of extract(x, y) has bits 0 0 0 0 a c f g.
-- 6. Let m be (DC.msiptp.PPN x 2<sup>12</sup>).
-- 7. Let msipte be the value of sixteen bytes at address (m | (I x 16)). If accessing msipte violates a PMA or PMP check, then stop and report "MSI PTE load access fault" (cause = 261).
-- 8. If msipte access detects a data corruption (a.k.a. poisoned data), then stop and report "MSI PT data corruption" (cause = 270).
-- 9. If msipte.V == 0, then stop and report "MSI PTE not valid" (cause = 262).
-- 10. If msipte.C == 1, then further processing to interpret the PTE is implementation defined.
-- 11. If msipte.C == 0 then the process is outlined in subsequent steps.
-- 12. If msipte.M == 0 or msipte.M == 2, then stop and report "MSI PTE misconfigured" (cause = 263).
-- 13. If msipte.M == 3 the PTE is in basic translate mode and the translation process is as follows:
-  - a. If any bits or encoding that are reserved for future standard use are set within msipte, stop and report "MSI PTE misconfigured" (cause = 263).
-  - b. Compute the translated address as msipte.PPN << 12 | A[11:0].
-- 14. If msipte.M == 1 the PTE is in MRIF mode and the translation process is as follows:
-  - a. If capabilities.MSI\_MRIF == 0, stop and report "MSI PTE misconfigured" (cause = 263).
-  - b. If any bits or encoding that are reserved for future standard use are set within msipte, stop and report "MSI PTE misconfigured" (cause = 263).
-  - c. The address of the destination MRIF is msipte.MRIF\_Address[55:9] \* 512.
-  - d. The destination address of the notice MSI is msipte.NPPN << 12.
-  - e. Let NID be (msipte.N10 << 10) | msipte.N[9:0]. The data value for notice MSI is the 11-bit NID value zero-extended to 32-bits.
-- 15. The access permissions associated with the translation determined through this process are equivalent to that of a regular RISC-V second-stage PTE with R=W=U=1 and X=0. Similar to a second-stage PTE, when checking the U bit, the transaction is treated as not requesting supervisor privilege.
-  - a. If the transaction is an Untranslated or Translated read-for-execute then stop and report "Instruction access fault" (cause = 1).
-- 16. MSI address translation process is complete.
+7. Let `msipte` be the value of sixteen bytes at address `(m | (I × 16))`. If accessing `msipte` violates a PMA or PMP check, then stop and report "MSI PTE load access fault" (cause = 261).
 
-*Unlike regular RISC-V leaf PTEs, MSI PTEs do not have an accessed (*A*) or dirty (*D*) bit. An IOMMU may treat an MSI PTE* as if *the* A *and* D *bits are always set to 1.*
+8. If `msipte` access detects a data corruption (a.k.a. poisoned data), then stop and report "MSI PT data corruption" (cause = 270).
 
-![](_page_40_Picture_26.jpeg)
+9. If `msipte.V == 0`, then stop and report "MSI PTE not valid" (cause = 262).
 
-*In MRIF mode, the Advanced Interrupt Architecture Specification defines the operation to store the incoming MSIs into the destination MRIF and to generate the notice MSI. These operations may be performed by the IOMMU itself or the IOMMU may provide the destination MRIF address, the notice MSI address, and the notice MSI data value to the I/O bridge in* *response to the translation request and the operations may be performed by the I/O bridge.*
+10. If `msipte.C == 1`, then further processing to interpret the PTE is implementation defined.
 
-# <span id="page-41-0"></span>3.4. IOMMU updating of PTE accessed (A) and dirty (D) updates
+11. If `msipte.C == 0` then the process is outlined in subsequent steps.
 
-When capabilities.AMO\_HWAD is 1, the IOMMU supports updating the A and D bits in PTEs atomically. When updating of A and D bits in second-stage PTEs is enabled (DC.tc.GADE=1) and/or updating of A and D bits in first-stage PTEs is enabled (DC.tc.SADE=1) the following rules apply:
+12. If `msipte.M == 0` or `msipte.M == 2`, then stop and report "MSI PTE misconfigured" (cause = 263).
 
-- 1. The A and/or D bit updates by the IOMMU must follow the rules specified by the Privileged specification for validity, permission checking, and atomicity.
-- 2. The PTE update must be globally visible before a memory access using the translated address provided by the IOMMU becomes globally visible. Specifically, when a translated address is provided to a device in an ATS Translation completion, the PTE update must be globally visible before a memory access from the device using the translated address becomes globally visible.
+13. If `msipte.M == 3` the PTE is in basic translate mode and the translation process is as follows:
+    1. If any bits or encoding that are reserved for future standard use are set within `msipte`, stop and report "MSI PTE misconfigured" (cause = 263).
+    2. Compute the translated address as `msipte.PPN << 12 | A[11:0]`.
 
-![](_page_42_Picture_1.jpeg)
+14. If `msipte.M == 1` the PTE is in MRIF mode and the translation process is as follows:
+    1. If `capabilities.MSI_MRIF == 0`, stop and report "MSI PTE misconfigured" (cause = 263).
+    2. If any bits or encoding that are reserved for future standard use are set within `msipte`, stop and report "MSI PTE misconfigured" (cause = 263).
+    3. The address of the destination MRIF is `msipte.MRIF_Address[55:9] × 512`.
+    4. The destination address of the notice MSI is `msipte.NPPN << 12`.
+    5. Let `NID` be `(msipte.N10 << 10) | msipte.N[9:0]`. The data value for notice MSI is the 11-bit `NID` value zero-extended to 32-bits.
 
-*The A and D bits are never cleared by the IOMMU. If the supervisor software does not rely on accessed and/or dirty bits, e.g. if it does not swap memory pages to secondary storage or if the pages are being used to map I/O space, it should set them to 1 in the PTE to improve performance.*
+15. The access permissions associated with the translation determined through this process are equivalent to that of a regular RISC-V second-stage PTE with `R=W=U=1` and `X=0`. Similar to a second-stage PTE, when checking the `U` bit, the transaction is treated as not requesting supervisor privilege.
+    1. If the transaction is an Untranslated or Translated read-for-execute then stop and report "Instruction access fault" (cause = 1).
 
-# <span id="page-42-0"></span>3.5. Faults from virtual address translation process
+16. MSI address translation process is complete.
 
-Faults detected during the two-stage address translation specified in the RISC-V Privileged specification [[6\]](#page-106-6) cause the IOVA translation process to stop and report the detected fault.
+> **Notes:**
+> - Unlike regular RISC-V leaf PTEs, MSI PTEs do not have an accessed (`A`) or dirty (`D`) bit. An IOMMU may treat an MSI PTE as if the `A` and `D` bits are always set to 1.
+> - In MRIF mode, the Advanced Interrupt Architecture Specification defines the operation to store the incoming MSIs into the destination MRIF and to generate the notice MSI. These operations may be performed by the IOMMU itself or the IOMMU may provide the destination MRIF address, the notice MSI address, and the notice MSI data value to the I/O bridge in response to the translation request and the operations may be performed by the I/O bridge.
 
-# <span id="page-42-1"></span>3.6. PCIe ATS translation request handling
+---
 
-ATS [\[4\]](#page-106-4) translation requests that encounter a configuration error results in a Completer Abort (CA) response to the requester. The following cause codes belong to this category:
+## 3.4. IOMMU updating of PTE accessed (A) and dirty (D) updates
 
-- ⚫ Instruction access fault (cause = 1)
-- ⚫ Read access fault (cause = 5)
-- ⚫ Write/AMO access fault (cause = 7)
-- ⚫ MSI PTE load access fault (cause = 261)
-- ⚫ MSI PTE misconfigured (cause = 263)
-- ⚫ PDT entry load access fault (cause = 265)
-- ⚫ PDT entry misconfigured (cause = 267)
+When `capabilities.AMO_HWAD` is 1, the IOMMU supports updating the A and D bits in PTEs atomically. When updating of A and D bits in second-stage PTEs is enabled (`DC.tc.GADE=1`) and/or updating of A and D bits in first-stage PTEs is enabled (`DC.tc.SADE=1`) the following rules apply:
+
+1. The A and/or D bit updates by the IOMMU must follow the rules specified by the Privileged specification for validity, permission checking, and atomicity.
+2. The PTE update must be globally visible before a memory access using the translated address provided by the IOMMU becomes globally visible. Specifically, when a translated address is provided to a device in an ATS Translation completion, the PTE update must be globally visible before a memory access from the device using the translated address becomes globally visible.
+
+> **Note**: The A and D bits are never cleared by the IOMMU. If the supervisor software does not rely on accessed and/or dirty bits, e.g. if it does not swap memory pages to secondary storage or if the pages are being used to map I/O space, it should set them to 1 in the PTE to improve performance.
+
+---
+
+## 3.5. Faults from virtual address translation process
+
+Faults detected during the two-stage address translation specified in the RISC-V Privileged specification cause the IOVA translation process to stop and report the detected fault.
+
+---
+
+## 3.6. PCIe ATS translation request handling
+
+ATS translation requests that encounter a configuration error results in a Completer Abort (CA) response to the requester. The following cause codes belong to this category:
+
+- Instruction access fault (cause = 1)
+- Read access fault (cause = 5)
+- Write/AMO access fault (cause = 7)
+- MSI PTE load access fault (cause = 261)
+- MSI PTE misconfigured (cause = 263)
+- PDT entry load access fault (cause = 265)
+- PDT entry misconfigured (cause = 267)
 
 If there is a permanent error or if ATS transactions are disabled then an Unsupported Request (UR) response is generated. The following cause codes belong to this category:
 
-- ⚫ All inbound transactions disallowed (cause = 256)
-- ⚫ DDT entry load access fault (cause = 257)
-- ⚫ DDT entry not valid (cause = 258)
-- ⚫ DDT entry misconfigured (cause = 259)
-- ⚫ Transaction type disallowed (cause = 260)
+- All inbound transactions disallowed (cause = 256)
+- DDT entry load access fault (cause = 257)
+- DDT entry not valid (cause = 258)
+- DDT entry misconfigured (cause = 259)
+- Transaction type disallowed (cause = 260)
 
-When translation could not be completed due to the following causes a Success Response with R and W bits set to 0 is generated. No faults are logged in the fault queue on these errors. The translated address returned with such completions is UNSPECIFIED.
+When translation could not be completed due to the following causes a Success Response with R and W bits set to 0 is generated. No faults are logged in the fault queue on these errors. The translated address returned with such completions is `UNSPECIFIED`:
 
-- ⚫ Instruction page fault (cause = 12)
-- ⚫ Read page fault (cause = 13)
-- ⚫ Write/AMO page fault (cause = 15)
-- ⚫ Instruction guest page fault (cause = 20)
-- ⚫ Read guest-page fault (cause = 21)
-- ⚫ Write/AMO guest-page fault (cause = 23)
-- ⚫ PDT entry not valid (cause = 266)
-- ⚫ MSI PTE not valid (cause = 262)
+- Instruction page fault (cause = 12)
+- Read page fault (cause = 13)
+- Write/AMO page fault (cause = 15)
+- Instruction guest page fault (cause = 20)
+- Read guest-page fault (cause = 21)
+- Write/AMO guest-page fault (cause = 23)
+- PDT entry not valid (cause = 266)
+- MSI PTE not valid (cause = 262)
 
-If the translation request has a PASID with "Privilege Mode Requested" field set to 0, or the request does
+If the translation request has a PASID with "Privilege Mode Requested" field set to 0, or the request does not have a PASID then the request does not target privileged memory. If the U-bit that indicates if the memory is accessible to user mode is 0 then a Success response with R and W bits set to 0 is generated.
 
-not have a PASID then the request does not target privileged memory. If the U-bit that indicates if the memory is accessible to user mode is 0 then a Success response with R and W bits set to 0 is generated.
+If the translation request has a PASID with "Privilege Mode Requested" field set to 1, then the request targets privileged memory. If the U-bit that indicates if the page is accessible to user mode is 1 and the `SUM` bit in the `ta` field of the process-context is 0 then a Success response with R and W bits set to 0 is generated.
 
-If the translation request has a PASID with "Privilege Mode Requested" field set to 1, then the request targets privileged memory. If the U-bit that indicates if the page is accessible to user mode is 1 and the SUM bit in the ta field of the process-context is 0 then a Success response with R and W bits set to 0 is generated.
-
-If the translation could be successfully completed but the requested permissions are not present in either stage (Execute requested but no execute permission; no-write not requested and no write permission; no read permission) then a Success response is returned with the denied permission (R, W or X) set to 0 and the other permission bits set to the value determined from the page tables. The X permission is granted only if the R permission is also granted and the execute permission was requested. Execute-only translations are not compatible with PCIe ATS as PCIe requires read permission to be granted if the execute permission is granted.
+If the translation could be successfully completed but the requested permissions are not present in either stage (Execute requested but no execute permission; no-write requested and no write permission; no read permission) then a Success response is returned with the denied permission (R, W or X) set to 0 and the other permission bits set to the value determined from the page tables. The X permission is granted only if the R permission is also granted and the execute permission was requested. Execute-only translations are not compatible with PCIe ATS as PCIe requires read permission to be granted if the execute permission is granted.
 
 When a Success response is generated for an ATS translation request, no fault records are reported to software through the fault/event reporting mechanism, even when the response indicates no access was granted or some permissions were denied. Conversely, when a UR or CA response is generated for an ATS translation request, the corresponding fault is reported to software through the fault/event reporting mechanism.
 
-If the translation request is successfully completed and the address is determined to be an MSI address using the rules defined by the [Section 3.1.3.6,](#page-31-0) but the MSI PTE is configured in MRIF mode, a Success response is generated with the U bit (Untranslated access only) set to 1. The U bit being set to 1 in the response instructs the device that it must use only Untranslated requests to access the implied 4 KiB memory range. The R, W, and Exe bits in the response indicate the granted permissions.
+If the translation request is successfully completed and the address is determined to be an MSI address using the rules defined by the Section 3.1.3.6, but the MSI PTE is configured in MRIF mode, a Success response is generated with the U bit (Untranslated access only) set to 1. The U bit being set to 1 in the response instructs the device that it must use only Untranslated requests to access the implied 4 KiB memory range. The R, W, and Exe bits in the response indicate the granted permissions.
 
-![](_page_43_Picture_6.jpeg)
-
-*When a MSI PTE is configured in MRIF mode, a MSI write with data value* D *requires the IOMMU to set the interrupt-pending bit for interrupt identity* D *in the MRIF. A translation request from a device to a GPA that is mapped through a MRIF mode MSI PTE is not eligible to receive a translated address. This is accomplished by setting "Untranslated Access Only" (U) field of the returned response to 1.*
-
-![](_page_43_Picture_8.jpeg)
-
-*The translation range size returned in a Success response to an ATS translation request, when either stages of address translation are Bare, is implementation-defined. However, it is recommended that the translation range size be large, such as 2 MiB or 1 GiB.*
+> **Notes:**
+> - When a MSI PTE is configured in MRIF mode, a MSI write with data value `D` requires the IOMMU to set the interrupt-pending bit for interrupt identity `D` in the MRIF. A translation request from a device to a GPA that is mapped through a MRIF mode MSI PTE is not eligible to receive a translated address. This is accomplished by setting "Untranslated Access Only" (U) field of the returned response to 1.
+> - The translation range size returned in a Success response to an ATS translation request, when either stages of address translation are Bare, is implementation-defined. However, it is recommended that the translation range size be large, such as 2 MiB or 1 GiB.
 
 When a Success response is generated for an ATS translation request, the setting of the Priv, N, CXL.io, Global, and AMA fields is as follows:
 
-- ⚫ Priv field of the ATS translation completion is always set to 0 if the request does not have a PASID. When a PASID is present then the Priv field is set to the value in "Privilege Mode Requested" field as the permissions provided correspond to those the privilege mode indicate in the request.
-- ⚫ N field of the ATS translation completion is always set to 0. The device may use other means to determine if the No-snoop flag should be set in the translated requests.
-- ⚫ Global field is set to the value determined from the first-stage page tables if translation could be successfully completed and the request had a PASID present. In all other cases, including MSI address translations, this field is set to 0.
-- ⚫ If requesting device is not a CXL device then CXL.io is set to 0.
-- ⚫ If requesting device is a CXL type 1 or type 2 device
-  - ⚫ If the address is determined to be a MSI then the CXL.io bit is set to 1.
+- `Priv` field of the ATS translation completion is always set to 0 if the request does not have a PASID. When a PASID is present then the Priv field is set to the value in "Privilege Mode Requested" field as the permissions provided correspond to those the privilege mode indicate in the request.
+- `N` field of the ATS translation completion is always set to 0. The device may use other means to determine if the No-snoop flag should be set in the translated requests.
+- `Global` field is set to the value determined from the first-stage page tables if translation could be successfully completed and the request had a PASID present. In all other cases, including MSI address translations, this field is set to 0.
+- If requesting device is not a CXL device then `CXL.io` is set to 0.
+- If requesting device is a CXL type 1 or type 2 device:
+  - If the address is determined to be a MSI then the `CXL.io` bit is set to 1.
+  - Else if `T2GPA` is 1 in the device context then the `CXL.io` bit is set to 1.
+  - Else if the memory type, as determined by the Svpbmt extension, is NC or IO then the `CXL.io` bit is set to 1. If the memory type is PMA then the determination of the setting of this bit is `UNSPECIFIED`. If the Svpbmt extension is not supported then the setting of this bit is `UNSPECIFIED`.
+  - In all other cases the setting of this bit is `UNSPECIFIED`.
+- The `AMA` field is by default set to `000b`. The IOMMU may support an implementation-specific method to provide other encodings.
 
-- ⚫ Else if T2GPA is 1 in the device context then the CXL.io bit is set to 1.
-- ⚫ Else if the memory type, as determined by the Svpbmt extension, is NC or IO then the CXL.io bit is set to 1. If the memory type is PMA then the determination of the setting of this bit is UNSPECIFIED. If the Svpbmt extension is not supported then the setting of this bit is UNSPECIFIED.
-- ⚫ In all other cases the setting of this bit is UNSPECIFIED.
-- ⚫ The AMA field is by default set to 000b. The IOMMU may support an implementation-specific method to provide other encodings.
+> **Notes:**
+> - The IO bridge may override the `CXL.io` bit in the ATS translation completion based on the PMA of the translated address. Other implementations may provide an implementation-defined method for determining PMA for the translated address to set the `CXL.io` bit.
+> - Use of `T2GPA` set to 1 may not be compatible with CXL type 1 or type 2 devices as they use the CXL.cache protocol to implement caches tagged by the translated address returned in response to a PCIe ATS Translation Request. The IOMMU may not be invoked for translating addresses in CXL.cache transactions.
 
-*The IO bridge may override the CXL.io bit in the ATS translation completion based on the PMA of the translated address. Other implementations may provide an implementation-defined method for determining PMA for the translated address to set the CXL.io bit.*
+---
 
-![](_page_44_Picture_6.jpeg)
+## 3.7. PCIe ATS Page Request handling
 
-*Use of* T2GPA *set to 1 may not be compatible with CXL type 1 or type 2 devices as they use the CXL.cache protocol to implement caches tagged by the translated address returned in response to a PCIe ATS Translation Request. The IOMMU may not be invoked for translating addresses in CXL.cache transactions.*
+To process a "Page Request" or "Stop Marker" message, the IOMMU first locates the device-context to determine if ATS and PRI are enabled for the requester. If ATS and PRI are enabled, i.e. `EN_ATS` and `EN_PRI` are both set to 1, the IOMMU queues the message into an in-memory queue called the page-request-queue (`PQ`) (See Section 4.3). Following suitable processing of the "Page Request", a software handler may generate a "Page Request Group Response" message to the device.
 
-# <span id="page-44-0"></span>3.7. PCIe ATS Page Request handling
+When PRI is enabled for a device, the IOMMU may still be unable to report "Page Request" or "Stop Marker" messages through the `PQ` due to error conditions such as the queue being disabled, queue being full, or the IOMMU encountering access faults when attempting to access queue memory. These error conditions are specified in Section 4.3.
 
-To process a "Page Request" or "Stop Marker" message [[4](#page-106-4)], the IOMMU first locates the device-context to determine if ATS and PRI are enabled for the requester. If ATS and PRI are enabled, i.e. EN\_ATS and EN\_PRI are both set to 1, the IOMMU queues the message into an in-memory queue called the page-request-queue (PQ) (See [Section 4.3](#page-59-0)). Following suitable processing of the "Page Request", a software handler may generate a "Page Request Group Response" message to the device.
+If the `ddtp.iommu_mode` is `Bare` or is `Off`, then the IOMMU cannot locate a device-context for the requester.
 
-When PRI is enabled for a device, the IOMMU may still be unable to report "Page Request" or "Stop Marker" messages through the PQ due to error conditions such as the queue being disabled, queue being full, or the IOMMU encountering access faults when attempting to access queue memory. These error conditions are specified in [Section 4.3](#page-59-0).
+If `EN_PRI` is set to 0, or `EN_ATS` is set to 0, or if the IOMMU is unable to locate the `DC` to determine the `EN_PRI` configuration, or the request could not be queued into `PQ` then the IOMMU behavior depends on the type of "Page Request":
 
-If the ddtp.iommu\_mode is Bare or is Off, then the IOMMU cannot locate a device-context for the requester.
+- If the "Page Request" does not require a response, i.e. the "Last Request in PRG" field of the message is set to 0, then such messages are silently discarded. "Stop Marker" messages do not require a response and are always silently discarded on such errors.
+- If the "Page Request" needs a response, then the IOMMU itself may generate a "Page Request Group Response" message to the device.
 
-If EN\_PRI is set to 0, or EN\_ATS is set to 0, or if the IOMMU is unable to locate the DC to determine the EN\_PRI configuration, or the request could not be queued into PQ then the IOMMU behavior depends on the type of "Page Request".
+When the IOMMU generates the response, the status field of the response depends on the cause of the error. If a fault condition prevents locating a valid device context then the `PRPR` value assumed is 0.
 
-- ⚫ If the "Page Request" does not require a response, i.e. the "Last Request in PRG" field of the message is set to 0, then such messages are silently discarded. "Stop Marker" messages do not require a response and are always silently discarded on such errors.
-- ⚫ If the "Page Request" needs a response, then the IOMMU itself may generate a "Page Request Group Response" message to the device.
+The status is set to **Response Failure** if the following faults are encountered:
 
-When the IOMMU generates the response, the status field of the response depends on the cause of the error. If a fault condition prevents locating a valid device context then the PRPR value assumed is 0.
+- `ddtp.iommu_mode` is `Off` (cause = 256)
+- DDT entry load access fault (cause = 257)
+- DDT entry misconfigured (cause = 259)
+- DDT entry not valid (cause = 258)
+- Page-request queue is not enabled (`pqcsr.pqen == 0` or `pqcsr.pqon == 0`)
+- Page-request queue encountered a memory access fault (`pqcsr.pqmf == 1`)
 
-The status is set to Response Failure if the following faults are encountered:
+The status is set to **Invalid Request** if the following faults are encountered:
 
-- ⚫ ddtp.iommu\_mode is Off (cause = 256)
-- ⚫ DDT entry load access fault (cause = 257)
-- ⚫ DDT entry misconfigured (cause = 259)
-- ⚫ DDT entry not valid (cause = 258)
-- ⚫ Page-request queue is not enabled (pqcsr.pqen == 0 or pqcsr.pqon == 0)
-- ⚫ Page-request queue encountered a memory access fault (pqcsr.pqmf == 1)
+- `ddtp.iommu_mode` is `Bare` (cause = 260)
+- `EN_PRI` is set to 0 (cause = 260)
 
-The status is set to Invalid Request if the following faults are encountered:
+The status is set to **Success** if no other faults were encountered but the "Page Request" could not be queued due to the page-request queue being full (`pqt == pqh - 1`) or had a overflow (`pqcsr.pqof == 1`).
 
-- ⚫ ddtp.iommu\_mode is Bare (cause = 260)
-- ⚫ EN\_PRI is set to 0 (cause = 260)
+> **Notes:**
+> - When SR-IOV VF is used as a unit of allocation, a hypervisor may disable page requests from one of the virtual functions by setting `EN_PRI` to 0. However the page-request interface is shared by the PF and all VFs. The IOMMU protocol specific logic classifies this condition (cause = 260) as a non-catastrophic failure, an Invalid Request, in its response to avoid the shared PRI in the device being disabled for all PFs/VFs.
+> - A "Stop Marker" is encoded as a "Page Request" with a PASID but with the L, W, and R fields set to 1, 0, and 0 respectively.
 
-The status is set to Success if no other faults were encountered but the "Page Request" could not be queued due to the page-request queue being full (pqt == pqh - 1) or had a overflow (pqcsr.pqof == 1).
-
-![](_page_45_Picture_12.jpeg)
-
-*When SR-IOV VF is used as a unit of allocation, a hypervisor may disable page requests from one of the virtual functions by setting* EN\_PRI *to 0. However the page-request interface is shared by the PF and all VFs. The IOMMU protocol specific logic classifies this condition (cause = 260) as a non-catastrophic failure, an Invalid Request, in its response to avoid the shared PRI in the device being disabled for all PFs/VFs.*
-
-![](_page_45_Picture_14.jpeg)
-
-*A "Stop Marker" is encoded as a "Page Request" with a PASID but with the L, W, and R fields set to 1, 0, and 0 respectively.*
-
-For IOMMU-generated "Page Request Group Response" messages that have status Invalid Request or Success, the PRG-response-PASID-required (PRPR) bit when set to 1 indicates that the IOMMU response message should include a PASID if the associated "Page Request" had a PASID.
+For IOMMU-generated "Page Request Group Response" messages that have status Invalid Request or Success, the PRG-response-PASID-required (`PRPR`) bit when set to 1 indicates that the IOMMU response message should include a PASID if the associated "Page Request" had a PASID.
 
 For IOMMU-generated "Page Request Group Response" with response code set to Response Failure, if the "Page Request" had a PASID then response is generated with a PASID.
 
 No faults are logged in the fault queue for PCIe ATS "Page Request" messages for the following conditions:
 
-- ⚫ Page-request queue is not enabled (pqcsr.pqen == 0 or pqcsr.pqon == 0)
-- ⚫ Page-request queue encountered a memory access fault (pqcsr.pqmf == 1)
-- ⚫ "Page Request" could not be queued due to the page-request queue being full (pqt == pqh 1) or had a overflow (pqcsr.pqof == 1).
+- Page-request queue is not enabled (`pqcsr.pqen == 0` or `pqcsr.pqon == 0`)
+- Page-request queue encountered a memory access fault (`pqcsr.pqmf == 1`)
+- "Page Request" could not be queued due to the page-request queue being full (`pqt == pqh - 1`) or had a overflow (`pqcsr.pqof == 1`).
 
-# <span id="page-46-0"></span>3.8. Caching in-memory data structures
+---
+
+## 3.8. Caching in-memory data structures
 
 To speed up Direct Memory Access (DMA) translations, the IOMMU may make use of translation caches to hold entries from device-directory-table, process-directory-table, first-stage and second-stage translation tables, and MSI page tables. These caches are collectively referred to as the IOMMU Address Translation Caches (IOATC).
 
-This specification does not allow the caching of first/second-stage PTEs whose V (valid) bit is clear, nonleaf DDT entries whose V (valid) bit is clear, Device-context whose V (valid) bit is clear, non-leaf PDT entries whose V (valid) bit is clear, Process-context whose V (valid) bit is clear, or MSI PTEs whose V bit is clear.
+This specification does not allow the caching of first/second-stage PTEs whose `V` (valid) bit is clear, non-leaf DDT entries whose `V` (valid) bit is clear, Device-context whose `V` (valid) bit is clear, non-leaf PDT entries whose `V` (valid) bit is clear, Process-context whose `V` (valid) bit is clear, or MSI PTEs whose `V` bit is clear.
 
 These IOATC do not observe modifications to the in-memory data structures using explicit loads and stores by RISC-V harts or by device DMA. Software must use the IOMMU commands to invalidate the cached data structure entries using IOMMU commands to synchronize the IOMMU operations to observe updates to in-memory data structures. A simpler implementation may not implement IOATC for some or any of the in-memory data structures. The IOMMU commands may use one or more IDs to tag the cached entries to identify a specific entry or a group of entries.
 
-| Data Structure cached                                  | IDs used to tag entries | Invalidation command |
-|--------------------------------------------------------|-------------------------|----------------------|
-| Device Directory Table                                 | device_id               | IODIR.INVAL_DDT      |
-| Process Directory Table                                | device_id, process_id   | IODIR.INVAL_PDT      |
-| First-stage page table (when second-stage is not Bare) | GSCID, PSCID, and IOVA  | IOTINVAL.VMA         |
-| First-stage page table (when second-stage is Bare)     | PSCID, and IOVA         | IOTINVAL.VMA         |
-| Second-stage page table                                | GSCID, GPA              | IOTINVAL.GVMA        |
-| MSI page table                                         | GSCID, GPA              | IOTINVAL.GVMA        |
+**Table 8. Identifiers used to tag IOATC entries**
 
-*Table 8. Identifiers used to tag IOATC entries*
+| Data Structure cached                              | IDs used to tag entries          | Invalidation command |
+| :------------------------------------------------- | :------------------------------- | :------------------- |
+| Device Directory Table                             | `device_id`                      | `IODIR.INVAL_DDT`    |
+| Process Directory Table                            | `device_id`, `process_id`        | `IODIR.INVAL_PDT`    |
+| First-stage page table (when second-stage is not Bare) | `GSCID`, `PSCID`, and `IOVA` | `IOTINVAL.VMA`       |
+| First-stage page table (when second-stage is Bare) | `PSCID`, and `IOVA`              | `IOTINVAL.VMA`       |
+| Second-stage page table                            | `GSCID`, `GPA`                   | `IOTINVAL.GVMA`      |
+| MSI page table                                     | `GSCID`, `GPA`                   | `IOTINVAL.GVMA`      |
 
-# <span id="page-46-1"></span>3.9. Updating in-memory data structure entries
+---
 
-The RISC-V memory model requires memory access from a hart to be single-copy atomic. When RV32 is implemented the size of a single-copy atomic memory access is up to 32-bits. When RV64 is implemented the size of a single-copy atomic memory access is up to 64-bits. The size of a single-copy atomic memory access implemented by the IOMMU is UNSPECIFIED but is required to be at least 32-bits if all of the harts in the system implement RV32 and is required to be at least 64-bits if any of the harts in the system implement RV64.
+## 3.9. Updating in-memory data structure entries
 
-The IOMMU data structure entries have a V bit that when set to 1 indicates that the entry is valid.
+The RISC-V memory model requires memory access from a hart to be single-copy atomic. When RV32 is implemented the size of a single-copy atomic memory access is up to 32-bits. When RV64 is implemented the size of a single-copy atomic memory access is up to 64-bits. The size of a single-copy atomic memory access implemented by the IOMMU is `UNSPECIFIED` but is required to be at least 32-bits if all of the harts in the system implement RV32 and is required to be at least 64-bits if any of the harts in the system implement RV64.
 
-Software is allowed to make updates to a data structure entry that has the V bit set to 1. However, some rules as outlined below must be followed.
+The IOMMU data structure entries have a `V` bit that when set to 1 indicates that the entry is valid.
 
-- ⚫ It is generally unsafe for software to update fields of a valid data structure entry using a set of stores of width less than the minimal single-copy atomic memory access supported by an IOMMU as it is legal for an IOMMU to read the entry at any time, including when only some of the partial stores have taken effect.
-- ⚫ For an update to an IOMMU data structure entry to be atomic, software must use a single store of width equal to the minimal single-copy atomic memory access supported by an IOMMU.
-- ⚫ If the update to a field will make the field inconsistent with another field of the entry then software must first set the V field to 0 and use the commands outlined in [Section 3.8](#page-46-0) to invalidate any previous copies of that entry that may be in IOMMU caches before updating other fields of that entry.
+Software is allowed to make updates to a data structure entry that has the `V` bit set to 1. However, some rules as outlined below must be followed:
 
-⚫ The IOMMU is not required to immediately observe the software update to an entry. Software must use the commands outlined in [Section 3.8](#page-46-0) to invalidate any previous copies of that entry that may be in IOMMU caches to synchronize the updates to the entry with the operation of the IOMMU.
+- It is generally unsafe for software to update fields of a valid data structure entry using a set of stores of width less than the minimal single-copy atomic memory access supported by an IOMMU as it is legal for an IOMMU to read the entry at any time, including when only some of the partial stores have taken effect.
+- For an update to an IOMMU data structure entry to be atomic, software must use a single store of width equal to the minimal single-copy atomic memory access supported by an IOMMU.
+- If the update to a field will make the field inconsistent with another field of the entry then software must first set the `V` field to 0 and use the commands outlined in Section 3.8 to invalidate any previous copies of that entry that may be in IOMMU caches before updating other fields of that entry.
+- The IOMMU is not required to immediately observe the software update to an entry. Software must use the commands outlined in Section 3.8 to invalidate any previous copies of that entry that may be in IOMMU caches to synchronize the updates to the entry with the operation of the IOMMU.
 
-![](_page_47_Picture_2.jpeg)
+> **Note**: If a data structure entry is changed, the IOMMU may use the old value of the entry or the new value of the entry and the choice is unpredictable until software uses the commands outlined in Section 3.8 to invalidate any previous copies of that entry that may be in IOMMU caches to synchronize updates to the entry with the operation of the IOMMU. These are the only behaviors expected.
 
-*If a data structure entry is changed, the IOMMU may use the old value of the entry or the new value of the entry and the choice is unpredictable until software uses the commands outlined in [Section 3.8](#page-46-0) to invalidate any previous copies of that entry that may be in IOMMU caches to synchronize updates to the entry with the operation of the IOMMU. These are the only behaviors expected.*
+---
 
-# <span id="page-47-0"></span>3.10. Endianness of in-memory data structures
+## 3.10. Endianness of in-memory data structures
 
-The RISC-V memory model specifies byte-invariance for the entire address space. When mixed-endian mode of operation is supported, the IO bridge and the IOMMU must implement byte-invariant addressing such that a byte access to a given address accesses the same memory location in both little-endian and bigendian mode of operation.
+The RISC-V memory model specifies byte-invariance for the entire address space. When mixed-endian mode of operation is supported, the IO bridge and the IOMMU must implement byte-invariant addressing such that a byte access to a given address accesses the same memory location in both little-endian and big-endian mode of operation.
 
-<span id="page-47-1"></span>The endianness of implicit memory access to in-memory data structures is determined by fctl.BE or by DC.tc.SBE as follows:
+The endianness of implicit memory access to in-memory data structures is determined by `fctl.BE` or by `DC.tc.SBE` as follows:
 
-*Table 9. Endianness of memory access to data structures*
+**Table 9. Endianness of memory access to data structures**
 
 | Data Structure          | Controlled by |
-|-------------------------|---------------|
-| Device directory table  | fctl.BE       |
-| Second-stage page table | fctl.BE       |
-| MSI page table          | fctl.BE       |
-| Process directory Table | DC.tc.SBE     |
-| First-stage page table  | DC.tc.SBE     |
+| :---------------------- | :------------ |
+| Device directory table  | `fctl.BE`     |
+| Second-stage page table | `fctl.BE`     |
+| MSI page table          | `fctl.BE`     |
+| Process directory Table | `DC.tc.SBE`   |
+| First-stage page table  | `DC.tc.SBE`   |
 
-![](_page_47_Picture_9.jpeg)
-
-*The* PSCID *field of first-stage context, along with the* GSCID *(when two-stage address translation is active), identifies an address space. Configuring an identical* GSCID *and* PSCID *in two DC but with different* SBE *is not expected and if done may lead to the IOMMU interpreting a first-stage PTE as big-endian or little-endian. These are the only behaviors expected.*
-
-![](_page_47_Picture_11.jpeg)
-
-*Software must use an appropriate software sequence to swap bytes as necessary to create a mutually agreed to data representation when sharing data with an IO agent that does not share its endianness. Software must use an LR/SC sequence to perform atomic operations in non-native endian format when the data shared with such IO agents must be accessed atomically.*
+> **Notes:**
+> - The `PSCID` field of first-stage context, along with the `GSCID` (when two-stage address translation is active), identifies an address space. Configuring an identical `GSCID` and `PSCID` in two `DC` but with different `SBE` is not expected and if done may lead to the IOMMU interpreting a first-stage PTE as big-endian or little-endian. These are the only behaviors expected.
+> - Software must use an appropriate software sequence to swap bytes as necessary to create a mutually agreed to data representation when sharing data with an IO agent that does not share its endianness. Software must use an LR/SC sequence to perform atomic operations in non-native endian format when the data shared with such IO agents must be accessed atomically.

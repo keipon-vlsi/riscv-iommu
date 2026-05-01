@@ -1,0 +1,11 @@
+# NOTE:
+#   url は ved-rivos/iommu-reference (= 仕様著者によるゴールデンリファレンス) を指す。
+#   キミの local checkout が `iommu_ref_model` という名前なら、それを fork して
+#   GitHub に上げてから、ここの url を自分の repo に書き換えてもよい。
+#   ピン留めしたい commit があれば後段で `git submodule add -b <branch>` の代わりに
+#   `git -C third_party/iommu-reference checkout <sha>` してから commit すること。
+
+[submodule "third_party/iommu-reference"]
+	path = third_party/iommu-reference
+	url = https://github.com/riscv-non-isa/riscv-iommu.git
+	branch = main

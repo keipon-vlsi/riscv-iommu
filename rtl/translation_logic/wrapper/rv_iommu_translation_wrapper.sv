@@ -63,7 +63,7 @@ module rv_iommu_translation_wrapper #(
 
     // AXI ports directed to Data Structures Interface
     // CDW
-    input      cdw_axi_resp_i,
+    input  axi_rsp_t    cdw_axi_resp_i,
     output axi_req_t    cdw_axi_req_o,
     // PTW
     input  axi_rsp_t    ptw_axi_resp_i,

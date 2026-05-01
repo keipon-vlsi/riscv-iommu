@@ -499,7 +499,6 @@ module rv_iommu_tw_sv39x4_pc #(
         .en_1S_i                (ptw_en_1S          ),  // Enable signal for stage 1 translation. Defined by DC/PC
         .en_2S_i                (ptw_en_2S          ),  // Enable signal for stage 2 translation. Defined by DC only
         .is_store_i             (is_store           ),  // Indicate whether this translation was triggered by a store or a load
-        // .is_rx_i                (is_rx              ),  // Read-for-execute
 
         // PTW AXI Master memory interface
         .mem_resp_i             (ptw_axi_resp_i     ),  // Response port from memory
@@ -1015,12 +1014,14 @@ module rv_iommu_tw_sv39x4_pc #(
                     A fault is generated if:
                     - A bit is not set (checked in PTW);
                     - Page is not readable (checked in PTW);
+                    - (0): Transaction is a regular read (not for execution) and page has not R permission;
                     - (1): Transaction is a store and page has not write permissions (D bit checked in PTW);
                     - (2): Transaction is read-for-execute and page has not X permissions;
                     - (3): U-mode transaction and PTE has U=0;
                     - (4): S-mode transaction and PTE has U=1 and (SUM=0 or x=1).
                 */
-                if  ((is_store && (!iotlb_lu_1S_content.w && S1_en)                                                 ) ||        // (1)
+                if  ((!is_store && !is_rx && (!iotlb_lu_1S_content.r && S1_en)                                        ) ||        // (0)
+                    (is_store && (!iotlb_lu_1S_content.w && S1_en)                                                  ) ||        // (1)
                         (is_rx && (!iotlb_lu_1S_content.x && S1_en)                                                 ) ||        // (2)
                         ((!priv_lvl_i) && !iotlb_lu_1S_content.u && S1_en                                           ) ||        // (3)
                         (priv_lvl_i && iotlb_lu_1S_content.u && (!pdtc_lu_content.ta.sum || iotlb_lu_1S_content.x) && S1_en  )  // (4)
@@ -1031,8 +1032,9 @@ module rv_iommu_tw_sv39x4_pc #(
                         trans_valid_o   = 1'b0;
                 end
 
-                else if ((is_store && (!iotlb_lu_2S_content.w && S2_en)) || // (1)
-                            (is_rx && (!iotlb_lu_2S_content.x && S2_en))    // (2)
+                else if ((!is_store && !is_rx && (!iotlb_lu_2S_content.r && S2_en)) ||  // (0)
+                        (is_store && (!iotlb_lu_2S_content.w && S2_en))             ||  // (1)
+                            (is_rx && (!iotlb_lu_2S_content.x && S2_en))                // (2)
                         ) begin
                         if (is_store)   wrap_cause_code = rv_iommu::STORE_GUEST_PAGE_FAULT;
                         else            wrap_cause_code = rv_iommu::LOAD_GUEST_PAGE_FAULT;
@@ -1114,7 +1116,7 @@ module rv_iommu_tw_sv39x4_pc #(
             wrap_cause_code = rv_iommu::TRANS_TYPE_DISALLOWED;
             wrap_error      = 1'b1;
         end
-    end 
+    end : translation
 
     //# Error routing
     always_comb begin : error_routing

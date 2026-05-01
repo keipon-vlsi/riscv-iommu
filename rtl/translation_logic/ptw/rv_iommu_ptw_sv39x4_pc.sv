@@ -47,7 +47,6 @@ module rv_iommu_ptw_sv39x4_pc #(
     input  logic                                en_1S_i,        // Enable signal for first-stage translation. Defined by DC/PC
     input  logic                                en_2S_i,        // Enable signal for second-stage translation. Defined by DC only
     input  logic                                is_store_i,     // Indicate whether this translation was triggered by a store or a load
-    // input  logic                                is_rx_i,        // Indicate whether the access is read-for-execute
 
     input  axi_rsp_t                            mem_resp_i,
     output axi_req_t                            mem_req_o,
@@ -570,6 +569,25 @@ module rv_iommu_ptw_sv39x4_pc #(
                                 ptw_stage_n = ptw_stage_q;
                                 update_o    = 1'b0;
                                 cdw_done_o  = 1'b0;
+                            end
+
+                            // A/D bit check
+                            //  - capabilities.amo_head=0 -> A/D bits are not updated by HW.
+                            //    Leaf-pte.A=0 or Leaf-pte.D=0 && is_store -> raise page fault
+                            //  - capabilities.amo_head=1 -> A/D bits are updated by HW.
+                            if (!pte.a) begin
+                                pf_excep_n = 1'b1;
+                                state_n     = ERROR;
+                                ptw_stage_n = ptw_stage_q;
+                                update_o    = 1'b0;
+                                cdw_done_o  = 1'b0;
+                            end
+                            else if ((ptw_stage_q == STAGE_1 || ptw_stage_q == STAGE_2_FINAL) && is_store_i && !pte.d) begin
+                                pf_excep_n  = 1'b1;
+                                state_n     = ERROR;
+                                ptw_stage_n = ptw_stage_q;
+                                update_o    = 1'b0;
+                                cdw_done_o  = 1'b0; 
                             end
                         end : leaf_pte
                         

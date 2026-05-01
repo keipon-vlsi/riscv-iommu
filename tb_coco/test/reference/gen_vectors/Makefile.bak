@@ -1,0 +1,43 @@
+# =============================================================================
+# Makefile for gen_vectors — drives ved-rivos/iommu-reference to enumerate
+# Phase 1 test vectors for the cocotb testbench.
+#
+# Adjust IOMMU_REF_DIR to the path of your iommu_ref_model checkout.
+# =============================================================================
+
+IOMMU_REF_DIR ?= /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu/iommu_ref_model
+
+CC      = gcc
+CFLAGS  = -O2 -g -Wall -Wno-error \
+          -I$(IOMMU_REF_DIR)/libiommu/include \
+          -I$(IOMMU_REF_DIR)/libtables/include
+LDFLAGS = -L$(IOMMU_REF_DIR)/libiommu \
+          -L$(IOMMU_REF_DIR)/libtables
+LDLIBS  = -liommu -ltables
+
+TARGET  = gen_vectors
+SRC     = gen_vectors.c
+OBJ     = gen_vectors.o
+JSONL   = golden_vectors.jsonl
+
+.PHONY: all run clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+$(OBJ): $(SRC)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+run: $(TARGET)
+	./$(TARGET) > $(JSONL)
+	@echo ""
+	@echo "✓ wrote $$(wc -l < $(JSONL)) cases to $(JSONL)"
+	@echo "  first line:"
+	@head -n 1 $(JSONL)
+	@echo "  last line:"
+	@tail -n 1 $(JSONL)
+
+clean:
+	rm -f $(TARGET) $(OBJ) $(JSONL)
