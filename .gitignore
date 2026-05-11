@@ -17,7 +17,7 @@
 **/dump.vcd
 **/dump.fst
 **/sim.log
-**/replay.log
+**/*.log
 **/.cocotb_build/
 
 # IDE / OS
