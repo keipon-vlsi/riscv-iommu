@@ -254,8 +254,16 @@ DEFAULT_S1_LEAF_PPN  = 0x13
 DEFAULT_G_ROOT_PPN   = 0x14
 DEFAULT_G_MID_PPN    = 0x15
 DEFAULT_G_LEAF_PPN   = 0x16
+# PDT (Process Directory Table) pages — PDTV=1 モード用
+DEFAULT_PDT_ROOT_PPN = 0x18
+DEFAULT_PDT_L1_PPN   = 0x19
+DEFAULT_PDT_LEAF_PPN = 0x1A
 DEFAULT_CQ_BASE_PPN  = 0x20
 DEFAULT_FQ_BASE_PPN  = 0x21
+
+# Process Context 固定値 (gen_common.h と同値)
+PC_PROCESS_ID_FIXED = 0x42
+PC_PSCID_FIXED      = 0x100
 
 # Queue サイズ (entry 数 = 2^log2sz)
 DEFAULT_CQ_LOG2SZ = 7   # 128 entry × 16 byte = 2 KiB

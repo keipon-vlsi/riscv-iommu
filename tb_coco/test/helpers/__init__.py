@@ -55,7 +55,10 @@ from .const import (
     DEFAULT_DDT_BASE_PPN,
     DEFAULT_S1_ROOT_PPN, DEFAULT_S1_MID_PPN, DEFAULT_S1_LEAF_PPN,
     DEFAULT_G_ROOT_PPN,  DEFAULT_G_MID_PPN,  DEFAULT_G_LEAF_PPN,
+    DEFAULT_PDT_ROOT_PPN, DEFAULT_PDT_L1_PPN, DEFAULT_PDT_LEAF_PPN,
     DEFAULT_CQ_BASE_PPN, DEFAULT_FQ_BASE_PPN,
+    # Process Context 固定値
+    PC_PROCESS_ID_FIXED, PC_PSCID_FIXED,
 )
 
 # ----- 個別 API (高度な用途) -----
@@ -63,7 +66,10 @@ from .memory import (
     make_pte, vpn_indices_sv39, vpn_indices_sv39x4,
     build_dc, build_dc_identity, build_dc_sv39_s1,
     build_dc_sv39x4_s2, build_dc_sv39_2stage,
-    install_dc_1lvl,
+    build_dc_sv39_s1_pc, build_dc_sv39x4_s2_pc, build_dc_sv39_2stage_pc,
+    install_dc_1lvl, install_pdt_pd20,
+    pack_pc_ta, pack_pc_fsc, pack_pdte,
+    PDT_MODE_PD20,
     setup_sv39_4k, setup_sv39_2m, setup_sv39_1g, setup_sv39_custom_leaf,
     pack_satp_like, pack_iohgatp, pack_ddtp,
 )

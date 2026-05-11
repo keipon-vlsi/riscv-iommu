@@ -17,6 +17,7 @@
 **/dump.vcd
 **/dump.fst
 **/sim.log
+**/replay.log
 **/.cocotb_build/
 
 # IDE / OS
@@ -38,4 +39,6 @@
 third_party/iommu-reference/libiommu/*.o
 third_party/iommu-reference/libiommu/*.a
 third_party/iommu-reference/libtables/*.o
-third_party/iommu-reference/libtables/*.a
+third_party/iommu-reference/libtables/*.a*.log
+*.jsonl
+__pycache__/

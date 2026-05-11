@@ -27,12 +27,18 @@ from .const import (
     DEFAULT_DDT_BASE_PPN,
     DEFAULT_S1_ROOT_PPN, DEFAULT_S1_MID_PPN, DEFAULT_S1_LEAF_PPN,
     DEFAULT_G_ROOT_PPN,  DEFAULT_G_MID_PPN,  DEFAULT_G_LEAF_PPN,
+    DEFAULT_PDT_ROOT_PPN, DEFAULT_PDT_L1_PPN, DEFAULT_PDT_LEAF_PPN,
     DEFAULT_CQ_BASE_PPN, DEFAULT_FQ_BASE_PPN,
     DEFAULT_CQ_LOG2SZ,   DEFAULT_FQ_LOG2SZ,
+    PC_PROCESS_ID_FIXED, PC_PSCID_FIXED,
 )
 from .memory import (
     install_dc_1lvl,
     build_dc_identity, build_dc_sv39_s1, build_dc_sv39x4_s2, build_dc_sv39_2stage,
+    build_dc_sv39_s1_pc, build_dc_sv39x4_s2_pc, build_dc_sv39_2stage_pc,
+    build_dc_msi,
+    install_pdt_pd20, pack_pc_ta, pack_pc_fsc,
+    ATGP_MODE_BARE, ATGP_MODE_SV39,
     setup_sv39_4k, setup_sv39_2m, setup_sv39_1g, setup_sv39_custom_leaf,
 )
 from .regs import configure_ddt_mode
@@ -130,7 +136,7 @@ class IommuEnv:
 
     def __init__(self, dut, *,
                   clock_period_ns: int = 10,
-                  ds_ram_size: int = 0x100000,        # 1 MiB
+                  ds_ram_size: int = 0x1000000,        # 16 MiB
                   comp_ram_size: int = 0x100_000_000, # 4 GiB sparse
                   ddt_base_ppn: int = DEFAULT_DDT_BASE_PPN,
                   s1_root_ppn: int = DEFAULT_S1_ROOT_PPN,
@@ -139,6 +145,9 @@ class IommuEnv:
                   g_root_ppn:  int = DEFAULT_G_ROOT_PPN,
                   g_mid_ppn:   int = DEFAULT_G_MID_PPN,
                   g_leaf_ppn:  int = DEFAULT_G_LEAF_PPN,
+                  pdt_root_ppn: int = DEFAULT_PDT_ROOT_PPN,
+                  pdt_l1_ppn:   int = DEFAULT_PDT_L1_PPN,
+                  pdt_leaf_ppn: int = DEFAULT_PDT_LEAF_PPN,
                   cq_base_ppn: int = DEFAULT_CQ_BASE_PPN,
                   fq_base_ppn: int = DEFAULT_FQ_BASE_PPN,
                   cq_log2sz:   int = DEFAULT_CQ_LOG2SZ,
@@ -163,6 +172,10 @@ class IommuEnv:
         self.g_root_ppn   = g_root_ppn
         self.g_mid_ppn    = g_mid_ppn
         self.g_leaf_ppn   = g_leaf_ppn
+        self.pdt_root_ppn = pdt_root_ppn
+        self.pdt_l1_ppn   = pdt_l1_ppn
+        self.pdt_leaf_ppn = pdt_leaf_ppn
+        self.msi_pt_root_ppn = 0x180   # MSI PT base (Flat). 他 PPN と衝突しない値。
 
         # Queue の設定 (setup() で実体化)
         self._cq_base_ppn = cq_base_ppn
@@ -290,6 +303,108 @@ class IommuEnv:
                                 ddt_base_ppn=self.ddt_base_ppn,
                                 did=did, dc_bytes=dc)
         self.log.info(f"  DC[did={did}] 2stage @ ds_ram[0x{addr:x}]")
+        await configure_ddt_mode(self.prog_master, self.dut,
+                                  mode=DDTP_MODE_1LVL,
+                                  ddt_base_ppn=self.ddt_base_ppn)
+
+    # ------------------------------------------------------------------
+    # DC 配置 (PDTV=1 / Process Context 版)
+    # ------------------------------------------------------------------
+    async def install_dc_sv39_s1_pc(self, *, did: int = 0,
+                                      pdt_root_ppn: int = None,
+                                      s1_root_ppn: int = None):
+        """PDTV=1, PC.fsc=Sv39, G=Bare の DC を配置し PDT を書く。"""
+        if pdt_root_ppn is None: pdt_root_ppn = self.pdt_root_ppn
+        if s1_root_ppn  is None: s1_root_ppn  = self.s1_root_ppn
+        dc = build_dc_sv39_s1_pc(pdt_root_ppn)
+        addr = install_dc_1lvl(self.ds_ram,
+                                ddt_base_ppn=self.ddt_base_ppn,
+                                did=did, dc_bytes=dc)
+        install_pdt_pd20(
+            self.ds_ram,
+            root_ppn=pdt_root_ppn, l1_ppn=self.pdt_l1_ppn,
+            leaf_ppn=self.pdt_leaf_ppn,
+            process_id=PC_PROCESS_ID_FIXED,
+            pc_ta_bytes=pack_pc_ta(pscid=PC_PSCID_FIXED),
+            pc_fsc_bytes=pack_pc_fsc(ATGP_MODE_SV39, s1_root_ppn),
+        )
+        self.log.info(f"  DC[did={did}] pc_sv39_s1 @ ds_ram[0x{addr:x}]")
+        await configure_ddt_mode(self.prog_master, self.dut,
+                                  mode=DDTP_MODE_1LVL,
+                                  ddt_base_ppn=self.ddt_base_ppn)
+
+    async def install_dc_sv39x4_s2_pc(self, *, did: int = 0,
+                                        pdt_root_ppn: int = None,
+                                        g_root_ppn: int = None, gscid: int = 0):
+        """PDTV=1, PC.fsc=Bare, G=Sv39x4 の DC を配置し PDT を書く。"""
+        if pdt_root_ppn is None: pdt_root_ppn = self.pdt_root_ppn
+        if g_root_ppn   is None: g_root_ppn   = self.g_root_ppn
+        dc = build_dc_sv39x4_s2_pc(pdt_root_ppn, g_root_ppn, gscid=gscid)
+        addr = install_dc_1lvl(self.ds_ram,
+                                ddt_base_ppn=self.ddt_base_ppn,
+                                did=did, dc_bytes=dc)
+        install_pdt_pd20(
+            self.ds_ram,
+            root_ppn=pdt_root_ppn, l1_ppn=self.pdt_l1_ppn,
+            leaf_ppn=self.pdt_leaf_ppn,
+            process_id=PC_PROCESS_ID_FIXED,
+            pc_ta_bytes=pack_pc_ta(pscid=PC_PSCID_FIXED),
+            pc_fsc_bytes=pack_pc_fsc(ATGP_MODE_BARE, 0),
+        )
+        self.log.info(f"  DC[did={did}] pc_sv39x4_s2 @ ds_ram[0x{addr:x}]")
+        await configure_ddt_mode(self.prog_master, self.dut,
+                                  mode=DDTP_MODE_1LVL,
+                                  ddt_base_ppn=self.ddt_base_ppn)
+
+    async def install_dc_2stage_pc(self, *, did: int = 0,
+                                     pdt_root_ppn: int = None,
+                                     s1_root_ppn: int = None,
+                                     g_root_ppn: int = None, gscid: int = 0):
+        """PDTV=1, PC.fsc=Sv39, G=Sv39x4 の DC を配置し PDT を書く。"""
+        if pdt_root_ppn is None: pdt_root_ppn = self.pdt_root_ppn
+        if s1_root_ppn  is None: s1_root_ppn  = self.s1_root_ppn
+        if g_root_ppn   is None: g_root_ppn   = self.g_root_ppn
+        dc = build_dc_sv39_2stage_pc(pdt_root_ppn, g_root_ppn, gscid=gscid)
+        addr = install_dc_1lvl(self.ds_ram,
+                                ddt_base_ppn=self.ddt_base_ppn,
+                                did=did, dc_bytes=dc)
+        install_pdt_pd20(
+            self.ds_ram,
+            root_ppn=pdt_root_ppn, l1_ppn=self.pdt_l1_ppn,
+            leaf_ppn=self.pdt_leaf_ppn,
+            process_id=PC_PROCESS_ID_FIXED,
+            pc_ta_bytes=pack_pc_ta(pscid=PC_PSCID_FIXED),
+            pc_fsc_bytes=pack_pc_fsc(ATGP_MODE_SV39, s1_root_ppn),
+        )
+        self.log.info(f"  DC[did={did}] pc_2stage @ ds_ram[0x{addr:x}]")
+        await configure_ddt_mode(self.prog_master, self.dut,
+                                  mode=DDTP_MODE_1LVL,
+                                  ddt_base_ppn=self.ddt_base_ppn)
+
+    async def install_dc_msi(self, *, did: int = 0,
+                              s1_root_ppn: int = None,
+                              g_root_ppn: int = None,
+                              msi_pt_root_ppn: int = None,
+                              gscid: int = 0):
+        """S=Sv39, G=Sv39x4, msiptp=Flat の DC を配置 + 1LVL DDT 化。"""
+        if s1_root_ppn      is None: s1_root_ppn      = self.s1_root_ppn
+        if g_root_ppn       is None: g_root_ppn       = self.g_root_ppn
+        if msi_pt_root_ppn  is None: msi_pt_root_ppn  = self.msi_pt_root_ppn
+
+        dc = build_dc_msi(
+            s1_root_ppn=s1_root_ppn,
+            g_root_ppn=g_root_ppn,
+            msi_pt_root_ppn=msi_pt_root_ppn,
+            msi_addr_pattern=(0x0000300000000000 >> 12),
+            msi_addr_mask=(0x000000FFFFFF000 >> 12),
+            gscid=gscid,
+        )
+        addr = install_dc_1lvl(self.ds_ram,
+                                ddt_base_ppn=self.ddt_base_ppn,
+                                did=did, dc_bytes=dc)
+        self.log.info(f"  DC[did={did}] msi(s1=0x{s1_root_ppn:x}, "
+                       f"g=0x{g_root_ppn:x}, msipt=0x{msi_pt_root_ppn:x}) "
+                       f"@ ds_ram[0x{addr:x}]")
         await configure_ddt_mode(self.prog_master, self.dut,
                                   mode=DDTP_MODE_1LVL,
                                   ddt_base_ppn=self.ddt_base_ppn)

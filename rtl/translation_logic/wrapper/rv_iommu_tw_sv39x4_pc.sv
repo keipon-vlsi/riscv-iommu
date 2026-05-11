@@ -256,6 +256,7 @@ module rv_iommu_tw_sv39x4_pc #(
     // PTW error
     logic ptw_error;
     logic [(rv_iommu::CAUSE_LEN-1):0]  ptw_cause_code;
+    
     // CDW error
     logic msiptw_error;
     logic [(rv_iommu::CAUSE_LEN-1):0]  msiptw_cause_code;
@@ -376,6 +377,12 @@ module rv_iommu_tw_sv39x4_pc #(
     logic   msiptw_ignore, mrif_handler_ignore;
     assign  ignore_request_o = (msiptw_ignore | mrif_handler_ignore);
 
+    // Bad gpaddr propagation
+    logic                       ptw_error_2S;
+    logic [riscv::SVX-1:0]      ptw_bad_gpaddr;
+    logic [riscv::SVX-1:0]      iotlb_bad_gpaddr;
+    logic                       wrap_cause_is_guest;
+
     //# Device Directory Table Cache
     rv_iommu_ddtc #(
         .DDTC_ENTRIES       (DDTC_ENTRIES   ),
@@ -492,13 +499,16 @@ module rv_iommu_tw_sv39x4_pc #(
         // Error signaling
         .ptw_active_o           (ptw_active         ),  // Set when PTW is walking memory
         .ptw_error_o            (ptw_error          ),  // set when an error occurred (excluding access errors)
-        .ptw_error_2S_o         (is_guest_pf_o      ),  // set when the fault occurred in stage 2
+        .ptw_error_2S_o         (ptw_error_2S       ),  // set when the fault occurred in stage 2
         .ptw_error_2S_int_o     (ptw_error_2S_int   ),  // set when fault occurred during an implicit access for 1st-stage translation
         .cause_code_o           (ptw_cause_code     ),
 
         .en_1S_i                (ptw_en_1S          ),  // Enable signal for stage 1 translation. Defined by DC/PC
         .en_2S_i                (ptw_en_2S          ),  // Enable signal for stage 2 translation. Defined by DC only
         .is_store_i             (is_store           ),  // Indicate whether this translation was triggered by a store or a load
+        .is_rx_i                (is_rx              ),  // Indicate whether this translation is for a read-for-execute access (to apply specific access checks)
+        .priv_lvl_i             (priv_lvl_i         ),  // Privilege level of the access to apply specific access checks
+        .sum_i                  (pdtc_lu_content.ta.sum     ),  // Supervisor User Memory access allowed for stage 1 translations
 
         // PTW AXI Master memory interface
         .mem_resp_i             (ptw_axi_resp_i     ),  // Response port from memory
@@ -543,7 +553,7 @@ module rv_iommu_tw_sv39x4_pc #(
         .iosatp_ppn_i           (iosatp_ppn         ),  // ppn from iosatp
         .iohgatp_ppn_i          (ptw_iohgatp_ppn    ),  // ppn from iohgatp (may be forwarded by the CDW)
 
-        .bad_gpaddr_o           (bad_gpaddr_o       )   // to return the GPA in case of guest page fault
+        .bad_gpaddr_o           (ptw_bad_gpaddr     )   // to return the GPA in case of guest page fault
     );
 
     //# MSI Address Translation support
@@ -972,7 +982,10 @@ module rv_iommu_tw_sv39x4_pc #(
                             end
                         end
 
-                        else pdtc_access = 1'b1;
+                        else begin
+                            iohgatp_ppn = dc_base.iohgatp.ppn;
+                            pdtc_access = 1'b1;
+                        end
                     end
                 end
             end
@@ -1138,5 +1151,35 @@ module rv_iommu_tw_sv39x4_pc #(
             default:            cause_code_o = '0;
         endcase
     end : error_routing
+
+        //# Guest page fault GPA reporting
+    // Combine PTW-path and IOTLB-hit-path guest faults so that bad_gpaddr_o
+    // and is_guest_pf_o are valid in both paths.
+    assign wrap_cause_is_guest = (wrap_cause_code == rv_iommu::LOAD_GUEST_PAGE_FAULT)
+                              || (wrap_cause_code == rv_iommu::STORE_GUEST_PAGE_FAULT);
+
+    // GPA seen by the IOTLB-hit-path fault:
+    //   S1 Bare + S2 enabled : GPA = IOVA (S1 is identity)
+    //   S1 + S2 (nested)     : GPA = (S1 leaf PPN merged with the appropriate iova offset)
+    always_comb begin : iotlb_bad_gpaddr_compute
+        iotlb_bad_gpaddr = '0;
+        if (S2_en && !S1_en) begin
+            iotlb_bad_gpaddr = iova_i[riscv::SVX-1:0];
+        end
+        else if (S1_en && S2_en) begin
+            if (iotlb_lu_1S_1G)
+                iotlb_bad_gpaddr = {iotlb_lu_1S_content.ppn[riscv::GPPNW-1:18], iova_i[29:0]};
+            else if (iotlb_lu_1S_2M)
+                iotlb_bad_gpaddr = {iotlb_lu_1S_content.ppn[riscv::GPPNW-1:9],  iova_i[20:0]};
+            else
+                iotlb_bad_gpaddr = {iotlb_lu_1S_content.ppn[riscv::GPPNW-1:0],  iova_i[11:0]};
+        end
+    end : iotlb_bad_gpaddr_compute
+
+    assign is_guest_pf_o = ptw_error_2S | (wrap_error & wrap_cause_is_guest);
+
+    assign bad_gpaddr_o  = ptw_error_2S
+                         ? ptw_bad_gpaddr
+                         : ((wrap_error & wrap_cause_is_guest) ? iotlb_bad_gpaddr : '0);
 
 endmodule

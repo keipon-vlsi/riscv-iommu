@@ -28,7 +28,7 @@ module rv_iommu_translation_wrapper #(
     parameter int unsigned  MRIFC_ENTRIES       = 4,
 
     // Include Process Context support
-    parameter bit           InclPC              = 0,
+    parameter bit           InclPC              = 1,
     // MSI translation support
     parameter rv_iommu::msi_trans_t MSITrans    = rv_iommu::MSI_DISABLED,
 

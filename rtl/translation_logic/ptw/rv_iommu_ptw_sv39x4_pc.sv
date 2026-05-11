@@ -47,6 +47,9 @@ module rv_iommu_ptw_sv39x4_pc #(
     input  logic                                en_1S_i,        // Enable signal for first-stage translation. Defined by DC/PC
     input  logic                                en_2S_i,        // Enable signal for second-stage translation. Defined by DC only
     input  logic                                is_store_i,     // Indicate whether this translation was triggered by a store or a load
+    input  logic                                is_rx_i,        // Indicate whether this translation was triggered by a read for execute (R=0, X=1)
+    input  logic                                priv_lvl_i,     // 0:U-mode, 1:S-mode,
+    input  logic                                sum_i,          // permit S-mode access to data with pte.u=1
 
     input  axi_rsp_t                            mem_resp_i,
     output axi_req_t                            mem_req_o,
@@ -569,6 +572,36 @@ module rv_iommu_ptw_sv39x4_pc #(
                                 ptw_stage_n = ptw_stage_q;
                                 update_o    = 1'b0;
                                 cdw_done_o  = 1'b0;
+                            end
+
+                            // =====================================================================
+                            // S1 leaf permission check (inline, BEFORE S2 walk starts)
+                            //   Mirrors the IOTLB hit-path check in rv_iommu_tw_sv39x4_pc.sv
+                            //   so that S1 fault precedence is preserved even when the S2 walk
+                            //   for the S1-leaf-GPA itself faults (= IOTLB never updated, hit-
+                            //   path check never fires).
+                            //
+                            //   Conditions (numbering matches the IOTLB hit path comment):
+                            //     (0) R access  + R=0
+                            //     (1) W access  + W=0
+                            //     (2) X access  + X=0
+                            //     (3) U-mode access + U=0 PTE
+                            //     (4) S-mode access + U=1 PTE + (SUM=0 OR X=1)
+                            //
+                            //   A/D は別 if で既存。pte.r==0 && pte.w==1 は Invalid PTE で trap 済。
+                            // =====================================================================
+                            if (ptw_stage_q == STAGE_1) begin
+                                if ((!is_store_i && !is_rx_i  && !pte.r)                       ||  // (0)
+                                    ( is_store_i              && !pte.w)                       ||  // (1)
+                                    ( is_rx_i                 && !pte.x)                       ||  // (2)
+                                    ((!priv_lvl_i)            && !pte.u)                       ||  // (3)
+                                    ( priv_lvl_i  &&  pte.u   && (!sum_i || pte.x)) ) begin       // (4)
+                                    pf_excep_n  = 1'b1;
+                                    state_n     = ERROR;
+                                    ptw_stage_n = ptw_stage_q;
+                                    update_o    = 1'b0;
+                                    cdw_done_o  = 1'b0;
+                                end
                             end
 
                             // A/D bit check
