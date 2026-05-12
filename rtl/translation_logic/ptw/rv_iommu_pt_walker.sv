@@ -61,15 +61,44 @@ module rv_iommu_pt_walker
         rsp_data_o  = '0;
         rsp_error_o = 1'b0;
 
-        // AXI defaults
-        mem_req_o          = '0;
-        mem_req_o.ar.id    = 4'b0011;
-        mem_req_o.ar.addr  = {{riscv::XLEN-riscv::PLEN{1'b0}}, req_addr_q};
-        mem_req_o.ar.len   = 8'd0;        // 1 beat = 8 B = 1 PTE
-        mem_req_o.ar.size  = 3'b011;
-        mem_req_o.ar.burst = axi_pkg::BURST_INCR;
-        mem_req_o.ar_valid = 1'b0;
-        mem_req_o.r_ready  = 1'b0;
+        // ── AXI defaults (= 旧 PTW と完全一致) ─────────────────────
+        // AW (= 使わないが明示)
+        mem_req_o.aw.id     = 4'b0010;
+        mem_req_o.aw.addr   = '0;
+        mem_req_o.aw.len    = 8'b0;
+        mem_req_o.aw.size   = 3'b011;
+        mem_req_o.aw.burst  = axi_pkg::BURST_FIXED;
+        mem_req_o.aw.lock   = '0;
+        mem_req_o.aw.cache  = '0;
+        mem_req_o.aw.prot   = '0;
+        mem_req_o.aw.qos    = '0;
+        mem_req_o.aw.region = '0;
+        mem_req_o.aw.atop   = '0;
+        mem_req_o.aw.user   = '0;
+        mem_req_o.aw_valid  = 1'b0;
+        // W
+        mem_req_o.w.data    = '0;
+        mem_req_o.w.strb    = '0;
+        mem_req_o.w.last    = '0;
+        mem_req_o.w.user    = '0;
+        mem_req_o.w_valid   = 1'b0;
+        // B
+        mem_req_o.b_ready   = 1'b0;
+        // AR (= 旧設計と完全一致: BURST_FIXED!)
+        mem_req_o.ar.id     = 4'b0000;
+        mem_req_o.ar.addr   = {{riscv::XLEN-riscv::PLEN{1'b0}}, req_addr_q};
+        mem_req_o.ar.len    = 8'b0;
+        mem_req_o.ar.size   = 3'b011;
+        mem_req_o.ar.burst  = axi_pkg::BURST_FIXED;     // ★ FIXED (旧設計準拠)
+        mem_req_o.ar.lock   = '0;
+        mem_req_o.ar.cache  = '0;
+        mem_req_o.ar.prot   = '0;
+        mem_req_o.ar.qos    = '0;
+        mem_req_o.ar.region = '0;
+        mem_req_o.ar.user   = '0;
+        mem_req_o.ar_valid  = 1'b0;
+        // R
+        mem_req_o.r_ready   = 1'b0;
 
         case (state_q)
             ST_IDLE: begin
