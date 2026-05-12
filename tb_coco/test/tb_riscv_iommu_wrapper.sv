@@ -551,9 +551,28 @@ module tb_riscv_iommu_wrapper
         .wsi_wires_o     ( wsi_wires_o         )
     );
 
-    initial begin
-        $dumpfile("dump.vcd");
-        $dumpvars(0, tb_riscv_iommu_wrapper);
-    end
+    `ifdef ENABLE_WAVE_DUMP
+        initial begin
+    `ifdef WAVE_FORMAT_VCD
+            $dumpfile("dump.vcd");
+    `else
+            $dumpfile("dump.fst");      // ★ .fst 拡張子で Verilator が FST encoding を選ぶ
+    `endif
+
+    `ifdef WAVE_FULL
+            $dumpvars(0, tb_riscv_iommu_wrapper);
+    `elsif WAVE_CDW
+            // ── CDW 系のみ dump ──────────────────────────────────────
+            // ★ 階層 path は wrapper の instance 名に合わせて要調整
+            $dumpvars(0, tb_riscv_iommu_wrapper.dut.i_rv_iommu_tw_sv39x4_pc.i_rv_iommu_ddtw);
+            $dumpvars(0, tb_riscv_iommu_wrapper.dut.i_rv_iommu_tw_sv39x4_pc.i_rv_iommu_pdtw);
+            $dumpvars(0, tb_riscv_iommu_wrapper.dut.i_rv_iommu_tw_sv39x4_pc.i_cdw_axi_mux);
+            // TW top レベル信号 (= ddtc_update, pdtc_update など) を 1 段だけ
+            $dumpvars(1, tb_riscv_iommu_wrapper.dut.i_rv_iommu_tw_sv39x4_pc);
+    `else
+            // WAVE_SCOPE=none: dump 開始だけして $dumpvars は呼ばない
+    `endif
+        end
+    `endif
 
 endmodule

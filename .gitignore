@@ -1,44 +1,56 @@
 # =============================================================================
-# .dockerignore — ビルドコンテキストに送るファイルを最小化
+# RISC-V IOMMU Verification .gitignore
 # =============================================================================
 
-# ビルド成果物 (ホスト側で生成されたもの)
-**/sim_build/
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/coverage_html/
-**/libiommu_coverage_html/
-**/coverage.info
-**/libiommu_coverage.info
-**/*.gcda
-**/*.gcno
-**/results.xml
-**/dump.vcd
-**/dump.fst
-**/sim.log
-**/*.log
-**/.cocotb_build/
+# ---------------------------------------
+# 1. シミュレーション成果物 (Cocotb / Verilator)
+# ---------------------------------------
+sim_build/
+.cocotb_build/
+*.vcd
+*.fst
+results.xml
 
-# IDE / OS
+# ---------------------------------------
+# 2. ログファイル
+# ---------------------------------------
+*.log
+# ただし、期待値ファイル(golden_*.jsonl)はGitで管理し、出力されたログ(rtl_log.jsonl等)は除外する
+*.jsonl
+!*golden*.jsonl
+
+# ---------------------------------------
+# 3. Pythonのキャッシュ
+# ---------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ---------------------------------------
+# 4. C/C++ コンパイル成果物・カバレッジ (Verilator / third_party)
+# ---------------------------------------
+*.o
+*.a
+*.gcda
+*.gcno
+*.dSYM/
+coverage.info
+coverage_html/
+
+# テストベクタ生成用の実行バイナリ（拡張子のないファイル）を除外
+# ただし、ソースコード(.c, .h)は除外しない
+tb_coco/test/reference/gen_vectors/gen_*
+!tb_coco/test/reference/gen_vectors/*.c
+!tb_coco/test/reference/gen_vectors/*.h
+
+# ---------------------------------------
+# 5. エディタ・OSの不要ファイル
+# ---------------------------------------
 .vscode/
 .idea/
-**/.DS_Store
-**/Thumbs.db
-
-# git 内部 (ビルドには不要)
-.git/
-.gitignore-not-this-file
-
-# bind-mount 経由で見えるので context に含める必要なし
-# (compose の context は repo root だが、bind-mount でも見えるため build 中に欲しくない)
-**/*.swp
-**/*.swo
-
-# 大きすぎるバイナリは入れない (submodule の build 成果物など)
-third_party/iommu-reference/libiommu/*.o
-third_party/iommu-reference/libiommu/*.a
-third_party/iommu-reference/libtables/*.o
-third_party/iommu-reference/libtables/*.a*.log
-*.jsonl
-__pycache__/
+.DS_Store
+*~
+*.swp
+*.swo
+*.bak
+:w  # Vimの操作ミスで生成されたファイル

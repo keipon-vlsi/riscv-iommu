@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(verilator --lint-only --sv -I packages/dependencies packages/dependencies/riscv_pkg.sv packages/dependencies/axi_pkg.sv packages/rv_iommu/rv_iommu_pkg.sv rtl/translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv tb_coco/translation_logic/ptw/tb_ptw_wrapper.sv --top-module tb_ptw_wrapper -Wno-fatal)",
+      "Bash(verilator --lint-only --sv +incdir+packages/dependencies packages/dependencies/riscv_pkg.sv packages/dependencies/axi_pkg.sv packages/rv_iommu/rv_iommu_pkg.sv rtl/translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv tb_coco/translation_logic/ptw/tb_ptw_wrapper.sv --top-module tb_ptw_wrapper -Wno-fatal)",
+      "Bash(python3 -m cocotb --version)",
+      "Bash(pip show *)",
+      "Bash(python3 -c \"import cocotb; print\\(cocotb.__version__\\)\")",
+      "Read(//Users/keipon/**)",
+      "Read(//usr/**)",
+      "Bash(nm /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu/libiommu.a)",
+      "Bash(cc -O2 -g -Wall -Wno-error --coverage -I. -I../../../../../../third_party/iommu-reference/iommu_ref_model/libiommu/include -I../../../../../../third_party/iommu-reference/iommu_ref_model/libtables/include -o gen_phase1_pte_flags gen_phase1_pte_flags.c gen_common.c -L../../../../../../third_party/iommu-reference/iommu_ref_model/libiommu -L../../../../../../third_party/iommu-reference/iommu_ref_model/libtables -ltables -liommu -ltables)",
+      "Bash(cc -O2 -g -Wall -Wno-error --coverage -I. -I/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu/include -I/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libtables/include -o gen_phase1_pte_flags gen_phase1_pte_flags.c gen_common.c -L/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu -L/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libtables -ltables -liommu -ltables)",
+      "Bash(nm /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libtables/libtables.a)",
+      "Bash(cc -O2 -g -Wall -Wno-error --coverage -I. -I/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu/include -I/Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libtables/include gen_phase1_pte_flags.c gen_common.c /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu/libiommu.a /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libtables/libtables.a /Users/keipon/Desktop/project/tt_pretraining/riscv-iommu-kawano/third_party/iommu-reference/iommu_ref_model/libiommu/libiommu.a -o gen_phase1_pte_flags_test)",
+      "Bash(cc *)",
+      "Bash(make all *)",
+      "Bash(make run-quick *)",
+      "Bash(make replay *)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

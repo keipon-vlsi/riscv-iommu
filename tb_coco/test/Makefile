@@ -1,40 +1,75 @@
 # =============================================================================
-# Makefile — riscv_iommu cocotb 統合テスト (v4, Docker / 相対パス対応)
+# Makefile — riscv_iommu cocotb 統合テスト (v5, FST default)
 #
-# 配置場所:  tb_coco/test/Makefile        ← v4 で _example/iommu_smoke/ から昇格
+# 配置場所:  tb_coco/test/Makefile
 #
-# ディレクトリ構成 (repo を /workspace に bind-mount した場合):
-#   /workspace/                              ← REPO_ROOT
-#   ├── rtl/  packages/  vendor/  include/   ← RTL
-#   ├── third_party/iommu-reference/         ← submodule
-#   └── tb_coco/test/                        ← この Makefile はここ
-#       ├── helpers/      補助関数パッケージ
-#       ├── scenarios/    test_*.py
-#       ├── stub/         common_cells/assertions.svh など
-#       ├── reference/gen_vectors/   ← 参照モデルからベクタ生成
-#       ├── translation_logic/ptw/   ← モジュール単位のテスト (ptw 単体)
-#       └── tb_riscv_iommu_wrapper.sv
+# v5 変更点:
+#   - デフォルト波形を VCD → FST に変更 (= file size 1/10, gtkwave 数倍速)
+#   - WAVES env を廃止 (cocotb 2.0 の WAVES=1 は --trace を強制し VCD になる)
+#   - WAVE_TRACE / WAVE_SCOPE 変数で trace 制御
 #
-# RTL_ROOT は __この Makefile からの相対__ で解決する。
-# Docker / ホスト / CI どこでも動く。
+# Usage:
+#   make replay                          # FST trace, CDW scope (default)
+#   make replay WAVE_TRACE=none          # trace 完全 OFF (= 最速)
+#   make replay WAVE_SCOPE=full          # 全モジュール trace (= 重い)
+#   make replay WAVE_TRACE=vcd           # 旧 VCD 形式に戻す (= 大きい)
+#
+# Tier:
+#   smoke         : 12 ケース手書き / ~30 秒
+#   replay        : quick tier / ~10-15 分     (default)
+#   replay-full   : full tier  / ~60 分        (nightly CI)
 # =============================================================================
 
-# ---- 波形ダンプ ----
-WAVES := 1
-export WAVES
-COMPILE_ARGS += --trace --trace-structs
+# =============================================================================
+# (0) Wave dump 制御 (= FST default)
+# =============================================================================
+# WAVE_TRACE: fst | vcd | none
+# WAVE_SCOPE: cdw | full | none  (testbench 側の $dumpvars 範囲)
+WAVE_TRACE ?= fst
+WAVE_SCOPE ?= cdw
+
+# cocotb 2.0 の WAVES=1 は --trace (VCD) を後付けする → 必ず unexport
+unexport WAVES
+
+ifeq ($(WAVE_TRACE),fst)
+  COMPILE_ARGS += --trace-fst
+  COMPILE_ARGS += --trace-threads 1
+  COMPILE_ARGS += --trace-depth 8
+  COMPILE_ARGS += --trace-structs
+  COMPILE_ARGS += --trace-max-array 64
+  COMPILE_ARGS += +define+ENABLE_WAVE_DUMP
+endif
+ifeq ($(WAVE_TRACE),vcd)
+  COMPILE_ARGS += --trace
+  COMPILE_ARGS += --trace-depth 8
+  COMPILE_ARGS += --trace-structs
+  COMPILE_ARGS += --trace-max-array 64
+  COMPILE_ARGS += +define+ENABLE_WAVE_DUMP
+  COMPILE_ARGS += +define+WAVE_FORMAT_VCD
+endif
+# WAVE_TRACE=none: trace flag 一切付けない
+
+# Scope は SV testbench 側で if-define 分岐
+ifeq ($(WAVE_SCOPE),cdw)
+  COMPILE_ARGS += +define+WAVE_CDW
+endif
+ifeq ($(WAVE_SCOPE),full)
+  COMPILE_ARGS += +define+WAVE_FULL
+endif
+
+COCOTB_HDL_TIMEUNIT = 1ps
 
 TOPLEVEL_LANG = verilog
 SIM           ?= verilator
 
-# ---- repo root を相対で確定 ----
-#  この Makefile は tb_coco/test/Makefile に置かれる前提なので、
-#  そこから 2 階層上 (= ../../) が repo root。
+# =============================================================================
+# (1) Repo root を相対で確定
+# =============================================================================
 HERE      := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 RTL_ROOT  ?= $(abspath $(HERE)/../..)
 
 # =============================================================================
-# (1) ソースファイル
+# (2) ソースファイル
 # =============================================================================
 VERILOG_SOURCES := \
   $(HERE)/tb_riscv_iommu_wrapper.sv \
@@ -44,7 +79,7 @@ VERILOG_SOURCES := \
   $(shell find $(RTL_ROOT)/vendor -name "*.sv")
 
 # =============================================================================
-# (2) インクルードパス
+# (3) インクルードパス
 # =============================================================================
 COMPILE_ARGS += -I$(HERE)/stub
 COMPILE_ARGS += -I$(RTL_ROOT)
@@ -63,7 +98,7 @@ COMPILE_ARGS += -I$(RTL_ROOT)/rtl/software_interface/wrapper
 COMPILE_ARGS += -I$(RTL_ROOT)/rtl/ext_interfaces
 
 # =============================================================================
-# (3) Verilator フラグ
+# (4) Verilator フラグ
 # =============================================================================
 COMPILE_ARGS += --language 1800-2017
 COMPILE_ARGS += -Wno-LATCH
@@ -75,52 +110,36 @@ COMPILE_ARGS += -Wno-UNUSED
 COMPILE_ARGS += -Wno-UNDRIVEN
 COMPILE_ARGS += -Wno-UNOPTFLAT
 
-# ---- RTL カバレッジ (A: 自作 RTL のカバレッジ) ----
-#  make RTL_COVERAGE=1 sim  で line + toggle カバレッジ取得。
-#  ★ "COVERAGE" という名前は cocotb 2.0 が Python user coverage trigger として
-#     hijack するので、衝突回避のため "RTL_COVERAGE" を使う。
+# ---- RTL カバレッジ (= make RTL_COVERAGE=1 sim でカバレッジ取得) ----
 ifeq ($(RTL_COVERAGE),1)
   COMPILE_ARGS += --coverage
   COMPILE_ARGS += --coverage-line --coverage-toggle
 endif
 
 # =============================================================================
-# (4) cocotb 設定
+# (5) cocotb 設定
 # =============================================================================
 TOPLEVEL = tb_riscv_iommu_wrapper
 
-# ★ MODULE はカンマ区切り。新ファイルを足したらここに追記。
 MODULE ?= test_smoke,test_ptw_normal,test_ptw_fault,test_ptw_access,test_iotlb
 
-# ---- PYTHONPATH ----
-#  HERE             … 'helpers' パッケージが見える (from helpers import IommuEnv)
-#  HERE/scenarios   … cocotb の MODULE=test_xxx で短名 import できる
 export PYTHONPATH := $(HERE):$(HERE)/scenarios:$(PYTHONPATH)
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
 # =============================================================================
-# (5) 補助ターゲット
+# (6) 補助ターゲット
 # =============================================================================
 smoke:
 	$(MAKE) sim MODULE=test_smoke
 
-# =============================================================================
-# replay — tier 別の RTL 検証
-#
-#  Tier:
-#    smoke         : 12 ケース手書き / ~30 秒    — 保存 / 数分毎
-#    replay        : quick tier  / ~10-15 分     — commit 前 / PR (default)
-#    replay-full   : full tier   / ~60 分        — nightly CI / リリース前
-#
-#  Tier 構成は gen_vectors/Makefile の ALL_CATEGORIES / FULL_ONLY_CATEGORIES
-#  に従う。新カテゴリを追加するときの分類ルールはそちらの README 参照。
-# =============================================================================
+# -----------------------------------------------------------------------------
+# replay tier 設定
+# -----------------------------------------------------------------------------
 GOLDEN_DIR    ?= $(HERE)/reference/gen_vectors
 RTL_LOG_JSONL ?= $(HERE)/rtl_log.jsonl
 DIFF_TOOL     ?= $(RTL_ROOT)/scripts/diff_logs.py
 
-# Tier 構成 (= gen_vectors/Makefile と一致させること)
 ALL_CATEGORIES       := phase1_pte_flags iova_variation s2_only nested \
                         nested_full nested_full_quick \
                         pc_phase1_pte_flags pc_iova_variation pc_s2_only \
@@ -135,44 +154,34 @@ QUICK_CATEGORIES     := $(filter-out $(FULL_ONLY_CATEGORIES),$(ALL_CATEGORIES))
 QUICK_GOLDEN := $(addprefix $(GOLDEN_DIR)/golden_,$(addsuffix .jsonl,$(QUICK_CATEGORIES)))
 FULL_GOLDEN  := $(addprefix $(GOLDEN_DIR)/golden_,$(addsuffix .jsonl,$(ALL_CATEGORIES)))
 
-# 内部 helper (bash で空白区切りリストを diff_logs に渡す形)
 _quick_ref_args := $(addprefix --ref ,$(QUICK_GOLDEN))
 _full_ref_args  := $(addprefix --ref ,$(FULL_GOLDEN))
 
 # -----------------------------------------------------------------------------
-# replay (default = quick tier)
+# replay (= quick tier, default)
 # -----------------------------------------------------------------------------
 replay:
-	$(MAKE) -C $(GOLDEN_DIR) run-quick    # quick tier の JSONL だけ生成
+	$(MAKE) -C $(GOLDEN_DIR) run-quick
 	GOLDEN_FILES="$(QUICK_GOLDEN)" RTL_LOG_JSONL=$(RTL_LOG_JSONL) \
 	  $(MAKE) sim MODULE=test_replay_golden
 	@echo ""
 	@echo "==== Diff RTL vs reference (QUICK tier) ===="
 	@python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_quick_ref_args)
 
-# -----------------------------------------------------------------------------
-# replay-full (full tier — nightly CI 向け)
-# -----------------------------------------------------------------------------
 replay-full:
-	$(MAKE) -C $(GOLDEN_DIR) run          # 全カテゴリ生成 (nested_full 含む)
+	$(MAKE) -C $(GOLDEN_DIR) run
 	GOLDEN_FILES="$(FULL_GOLDEN)" RTL_LOG_JSONL=$(RTL_LOG_JSONL) \
 	  $(MAKE) sim MODULE=test_replay_golden
 	@echo ""
 	@echo "==== Diff RTL vs reference (FULL tier) ===="
 	@python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_full_ref_args)
 
-# -----------------------------------------------------------------------------
-# replay-fail-fast (quick tier、最初のミスマッチで停止)
-# -----------------------------------------------------------------------------
 replay-fail-fast:
 	$(MAKE) -C $(GOLDEN_DIR) run-quick
 	GOLDEN_FILES="$(QUICK_GOLDEN)" RTL_LOG_JSONL=$(RTL_LOG_JSONL) \
 	  $(MAKE) sim MODULE=test_replay_golden
 	@python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_quick_ref_args) --fail-fast
 
-# -----------------------------------------------------------------------------
-# 単一カテゴリ replay: make replay-category CAT=iova_variation
-# -----------------------------------------------------------------------------
 replay-category:
 	@if [ -z "$(CAT)" ]; then echo "Usage: make replay-category CAT=<name>"; exit 1; fi
 	$(MAKE) -C $(GOLDEN_DIR) run-$(CAT)
@@ -182,14 +191,17 @@ replay-category:
 	    --ref $(GOLDEN_DIR)/golden_$(CAT).jsonl --category $(CAT)
 
 # -----------------------------------------------------------------------------
-# golden_*.jsonl だけ作る
+# golden_*.jsonl 生成
 # -----------------------------------------------------------------------------
-golden-vectors:           # full (= 全カテゴリ)
+golden-vectors:
 	$(MAKE) -C $(GOLDEN_DIR) run
 
-golden-vectors-quick:     # quick tier だけ
+golden-vectors-quick:
 	$(MAKE) -C $(GOLDEN_DIR) run-quick
 
+# -----------------------------------------------------------------------------
+# モジュール単体テスト
+# -----------------------------------------------------------------------------
 ptw-normal:
 	$(MAKE) sim MODULE=test_ptw_normal
 
@@ -202,15 +214,15 @@ ptw-access:
 iotlb:
 	$(MAKE) sim MODULE=test_iotlb
 
-# 1 ケースだけ実行: make one MODULE=test_ptw_fault TEST=test_20_pte_invalid
 one:
 	$(MAKE) sim MODULE=$(MODULE) TESTCASE=$(TEST)
 
 sim-log:
 	$(MAKE) sim 2>&1 | tee sim.log
 
-# ---- RTL カバレッジレポート (Verilator + lcov) ----
-#  COVERAGE=1 で sim を回した後に呼ぶ。
+# -----------------------------------------------------------------------------
+# Coverage / Wave 補助
+# -----------------------------------------------------------------------------
 coverage-report:
 	verilator_coverage --write-info coverage.info sim_build/coverage.dat
 	genhtml coverage.info --output-directory coverage_html
@@ -241,7 +253,7 @@ wave-image:
 
 clean::
 	rm -rf sim_build __pycache__ helpers/__pycache__ scenarios/__pycache__
-	rm -f  results.xml dump.vcd dump.fst sim.log
+	rm -f  results.xml dump.vcd dump.fst replay.log
 	rm -rf coverage.info coverage_html
 
 show-vars:
@@ -252,7 +264,10 @@ show-vars:
 	@echo "MODULE                = $(MODULE)"
 	@echo "PYTHONPATH            = $(PYTHONPATH)"
 	@echo "RTL_COVERAGE          = $(RTL_COVERAGE)"
-	@echo "WAVES                 = $(WAVES)"
+	@echo ""
+	@echo "==== Wave configuration ===="
+	@echo "WAVE_TRACE            = $(WAVE_TRACE)   (fst | vcd | none)"
+	@echo "WAVE_SCOPE            = $(WAVE_SCOPE)   (cdw | full | none)"
 	@echo ""
 	@echo "==== Test tier configuration ===="
 	@echo "ALL_CATEGORIES        = $(ALL_CATEGORIES)"

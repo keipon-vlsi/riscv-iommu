@@ -23,6 +23,11 @@
                 inherit pname version;
                 sha256 = "sha256-PWZ3Lfh9CjNIEPHEHPCQOXXjC7U4MotGuSCzPUIhtTY";
               };
+
+              propagatedBuildInputs = [
+                ps.find-libpython
+              ];
+
               doCheck = false;
             };
 
@@ -73,6 +78,7 @@
             pkgs.gtkwave
             pkgs.git
             pkgs.pkg-config
+            pkgs.tree
             pythonEnv
           ];
 
