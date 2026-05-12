@@ -607,7 +607,9 @@ module rv_iommu_tw_sv39x4_pc #(
         .lu_miss_o          ( s2_iotlb_miss         ),
         .lu_2S_content_o    ( s2_iotlb_lu_pte       )
     );
-
+    
+    logic flush;  // = 何もしない、 future use
+    assign flush = 1'b0;
     //# Page Table Walker (unchanged from PR0)
     rv_iommu_ptw_sv39x4_pc #(
         .axi_req_t              ( axi_req_t         ),
@@ -654,6 +656,7 @@ module rv_iommu_tw_sv39x4_pc #(
         .cdw_implicit_access_i  (cdw_implicit_access),
         .pdt_gppn_i             (pdt_gppn           ),
         .cdw_done_o             (cdw_done           ),
+        .flush_i                (flush              ),
         .flush_cdw_o            (flush_cdw          ),
         .iosatp_ppn_i           (iosatp_ppn         ),
         .iohgatp_ppn_i          (ptw_iohgatp_ppn    ),
@@ -809,49 +812,36 @@ module rv_iommu_tw_sv39x4_pc #(
 
     //# DDT walker
     rv_iommu_ddtw #(
-        .MSITrans       (MSITrans),
-        .axi_req_t      (axi_req_t),
-        .axi_rsp_t      (axi_rsp_t),
-        .DC_WIDTH       (DC_WIDTH)
+        .MSITrans   (MSITrans),
+        .axi_req_t  (axi_req_t),
+        .axi_rsp_t  (axi_rsp_t),
+        .DC_WIDTH   (DC_WIDTH)
     ) i_rv_iommu_ddtw (
         .clk_i                  (clk_i),
         .rst_ni                 (rst_ni),
         .active_o               (ddtw_active),
         .error_o                (ddtw_error),
         .cause_code_o           (ddtw_cause_code),
-        // Capability inputs (= CDW と同じ)
         .caps_ats_i             (capabilities_i.ats.q),
         .caps_t2gpa_i           (capabilities_i.t2gpa.q),
         .caps_pd20_i            (capabilities_i.pd20.q),
         .caps_pd17_i            (capabilities_i.pd17.q),
         .caps_pd8_i             (capabilities_i.pd8.q),
-        .caps_sv32_i            (capabilities_i.sv32.q),
         .caps_sv39_i            (capabilities_i.sv39.q),
-        .caps_sv48_i            (capabilities_i.sv48.q),
-        .caps_sv57_i            (capabilities_i.sv57.q),
-        .fctl_gxl_i             (fctl_i.gxl.q),
-        .caps_sv32x4_i          (capabilities_i.sv32x4.q),
         .caps_sv39x4_i          (capabilities_i.sv39x4.q),
-        .caps_sv48x4_i          (capabilities_i.sv48x4.q),
-        .caps_sv57x4_i          (capabilities_i.sv57x4.q),
         .caps_msi_flat_i        (capabilities_i.msi_flat.q),
         .caps_amo_hwad_i        (capabilities_i.amo_hwad.q),
         .caps_end_i             (capabilities_i.endi.q),
         .fctl_be_i              (fctl_i.be.q),
-        // AXI master (= mux 経由)
         .mem_resp_i             (ddtw_axi_resp),
         .mem_req_o              (ddtw_axi_req),
-        // Update DDTC
         .update_dc_o            (ddtc_update),
         .up_did_o               (ddtc_up_did),
         .up_dc_content_o        (ddtc_up_content),
-        // Trigger
         .req_did_i              (did_i),
         .init_i                 (ddtc_access && ~ddtc_lu_hit),
-        // Regmap
         .ddtp_ppn_i             (ddtp_i.ppn.q),
         .ddtp_mode_i            (ddtp_i.iommu_mode.q),
-        // PTW implicit S2 (for pdtp.PPN at end of DDT walk)
         .en_stage2_i            (S2_en),
         .ptw_done_i             (cdw_done),
         .flush_i                (flush_cdw),
@@ -863,36 +853,26 @@ module rv_iommu_tw_sv39x4_pc #(
 
     //# PDT walker
     rv_iommu_pdtw #(
-        .axi_req_t      (axi_req_t),
-        .axi_rsp_t      (axi_rsp_t)
+        .axi_req_t  (axi_req_t),
+        .axi_rsp_t  (axi_rsp_t)
     ) i_rv_iommu_pdtw (
         .clk_i                  (clk_i),
         .rst_ni                 (rst_ni),
         .active_o               (pdtw_active),
         .error_o                (pdtw_error),
         .cause_code_o           (pdtw_cause_code),
-        .dc_sxl_i               (dc_base.tc.sxl),
-        .caps_sv32_i            (capabilities_i.sv32.q),
-        .caps_sv39_i            (capabilities_i.sv39.q),
-        .caps_sv48_i            (capabilities_i.sv48.q),
-        .caps_sv57_i            (capabilities_i.sv57.q),
-        // AXI master (= mux 経由)
         .mem_resp_i             (pdtw_axi_resp),
         .mem_req_o              (pdtw_axi_req),
-        // Update PDTC
         .update_pc_o            (pdtc_update),
-        .up_did_o               (pdtc_up_did),         // 同じ device_id を使う
+        .up_did_o               (pdtc_up_did),
         .up_pid_o               (pdtc_up_pid),
         .up_pc_content_o        (pdtc_up_content),
-        // Trigger
         .req_did_i              (did_i),
         .req_pid_i              (process_id),
         .init_i                 (pdtc_access && ~pdtc_lu_hit),
-        // From DC
         .en_stage2_i            (S2_en),
         .pdtp_ppn_i             (dc_base.fsc.ppn),
         .pdtp_mode_i            (dc_base.fsc.mode),
-        // PTW implicit S2 (for non-leaf PDT entries)
         .ptw_done_i             (cdw_done),
         .flush_i                (flush_cdw),
         .pdt_ppn_i              (iotlb_up_2S_content.ppn),

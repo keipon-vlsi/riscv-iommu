@@ -25,6 +25,8 @@
 # =============================================================================
 # WAVE_TRACE: fst | vcd | none
 # WAVE_SCOPE: cdw | full | none  (testbench 側の $dumpvars 範囲)
+SHELL := /bin/bash
+
 WAVE_TRACE ?= fst
 WAVE_SCOPE ?= cdw
 
@@ -131,7 +133,12 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 # (6) 補助ターゲット
 # =============================================================================
 smoke:
-	$(MAKE) sim MODULE=test_smoke
+	@set -o pipefail; \
+	$(MAKE) sim MODULE=test_smoke 2>&1 | tee $@.log; \
+	EXIT_CODE=$$?; \
+	mv dump.fst $@.fst 2>/dev/null || true; \
+	mv dump.vcd $@.vcd 2>/dev/null || true; \
+	exit $$EXIT_CODE
 
 # -----------------------------------------------------------------------------
 # replay tier 設定
@@ -162,19 +169,27 @@ _full_ref_args  := $(addprefix --ref ,$(FULL_GOLDEN))
 # -----------------------------------------------------------------------------
 replay:
 	$(MAKE) -C $(GOLDEN_DIR) run-quick
+	@set -o pipefail; \
 	GOLDEN_FILES="$(QUICK_GOLDEN)" RTL_LOG_JSONL=$(RTL_LOG_JSONL) \
-	  $(MAKE) sim MODULE=test_replay_golden
-	@echo ""
-	@echo "==== Diff RTL vs reference (QUICK tier) ===="
-	@python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_quick_ref_args)
+	$(MAKE) sim MODULE=test_replay_golden 2>&1 | tee $@.log; \
+	EXIT_CODE=$$?; \
+	mv dump.fst $@.fst 2>/dev/null || true; \
+	mv dump.vcd $@.vcd 2>/dev/null || true; \
+	if [ $$EXIT_CODE -ne 0 ]; then exit $$EXIT_CODE; fi; \
+	echo ""; echo "==== Diff RTL vs reference (QUICK tier) ===="; \
+	python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_quick_ref_args)
 
 replay-full:
 	$(MAKE) -C $(GOLDEN_DIR) run
+	@set -o pipefail; \
 	GOLDEN_FILES="$(FULL_GOLDEN)" RTL_LOG_JSONL=$(RTL_LOG_JSONL) \
-	  $(MAKE) sim MODULE=test_replay_golden
-	@echo ""
-	@echo "==== Diff RTL vs reference (FULL tier) ===="
-	@python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_full_ref_args)
+	$(MAKE) sim MODULE=test_replay_golden 2>&1 | tee $@.log; \
+	EXIT_CODE=$$?; \
+	mv dump.fst $@.fst 2>/dev/null || true; \
+	mv dump.vcd $@.vcd 2>/dev/null || true; \
+	if [ $$EXIT_CODE -ne 0 ]; then exit $$EXIT_CODE; fi; \
+	echo ""; echo "==== Diff RTL vs reference (FULL tier) ===="; \
+	python3 $(DIFF_TOOL) --rtl $(RTL_LOG_JSONL) $(_full_ref_args)
 
 replay-fail-fast:
 	$(MAKE) -C $(GOLDEN_DIR) run-quick
@@ -253,7 +268,7 @@ wave-image:
 
 clean::
 	rm -rf sim_build __pycache__ helpers/__pycache__ scenarios/__pycache__
-	rm -f  results.xml dump.vcd dump.fst replay.log
+	rm -f results.xml *.vcd *.fst *.log
 	rm -rf coverage.info coverage_html
 
 show-vars:
