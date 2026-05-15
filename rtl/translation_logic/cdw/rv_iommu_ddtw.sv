@@ -49,6 +49,7 @@ module rv_iommu_ddtw
 
     input  logic                                en_stage2_i,
     input  logic                                ptw_done_i,
+    input  logic                                ptw_error_2S_i,
     input  logic                                flush_i,
     input  logic [riscv::PPNW-1:0]              pdt_ppn_i,
     output logic                                cdw_implicit_access_o,
@@ -121,7 +122,8 @@ module rv_iommu_ddtw
     assign up_did_o        = device_id_q;
 
     logic need_leaf_s2;
-    assign need_leaf_s2 = en_stage2_i && dc_tc_q.pdtv && (dc_iohgatp_q.mode != 4'b0000);
+    assign need_leaf_s2 = dc_tc_q.pdtv && (dc_iohgatp_q.mode != 4'b0000); // based on up-to-date DC
+    // assign need_leaf_s2 = (dc_iohgatp_q.mode != 0) && (dc_fsc_q.mode != 0);
 
     function automatic logic [riscv::PLEN-1:0] next_pptr_nl(
         input logic [riscv::PPNW-1:0] base_ppn,
@@ -339,12 +341,17 @@ module rv_iommu_ddtw
                             dc_fsc_n.ppn = pdt_ppn_i;
                             state_n      = ST_PROC;
                         end
+                        else if (ptw_error_2S_i) begin
+                            // cause is reported by PTW, so just go to ST_ERROR
+                            // cause_n = '0;
+                            state_n = ST_IDLE;
+                        end
                     end
-
+                    
                     default: ;
                 endcase
 
-                if (flush_i) state_n = ST_IDLE;
+                if (flush_i && state_n != ST_ERROR) state_n = ST_IDLE;
             end
 
             ST_PROC: begin

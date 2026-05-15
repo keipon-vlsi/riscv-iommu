@@ -15,13 +15,21 @@
         py = pkgs.python311;
         pythonEnv = py.withPackages (ps:
           let
-            # 1. cocotb 2.0.0
+            # 1. cocotb 1.9.2
+            #    cocotb 2.0 系は cocotb.handle._AssignmentResult を削除しており、
+            #    cocotb-bus 0.2.1 (= 最新 release) と互換性が無い。
+            #    cocotb-bus の cocotb 2.0 対応 release はまだ出ていないので、
+            #    cocotb 側を 1.x の最後の安定版に固定する。
+            #    sha256 が分からない場合は pkgs.lib.fakeHash にすると
+            #    nix が「got: sha256-xxx」 と正しい値を教えてくれるので
+            #    それで上書きする。
             myCocotb = ps.buildPythonPackage rec {
               pname = "cocotb";
-              version = "2.0.0";
+              version = "1.9.2";
               src = ps.fetchPypi {
                 inherit pname version;
-                sha256 = "sha256-PWZ3Lfh9CjNIEPHEHPCQOXXjC7U4MotGuSCzPUIhtTY";
+                sha256 = "sha256-5M3q9R7BsU5UMAg6xW7cC0itBRhPAwfZDeRP97/bFlI";  # ← 初回 nix develop 実行時に
+                                             #   出てくる正しい hash で書き換える
               };
 
               propagatedBuildInputs = [
@@ -106,16 +114,23 @@
 
           shellHook = ''
             unset VERILATOR_ROOT
-            echo "==== RISC-V IOMMU verification env ===="
-            echo "  verilator:  $(verilator --version | head -n1)"
-            echo "  python:     $(python --version)"
-            echo "  cocotb:     $(python -c 'import cocotb; print(cocotb.__version__)')"
-            echo "  gcc:        $(gcc --version | head -n1)"
-            echo "  pkg-config: $(pkg-config --version)"
-            echo "  zlib:       $(pkg-config --modversion zlib    2>/dev/null || echo 'NOT FOUND')  (cflags: $(pkg-config --cflags zlib 2>/dev/null))"
-            echo "  zstd:       $(pkg-config --modversion libzstd 2>/dev/null || echo 'NOT FOUND')"
-            echo "  gtkwave:    $(gtkwave --version 2>&1 | head -n1 || echo 'NOT FOUND')"
-            echo "======================================="
+
+            # -----------------------------------------------------------------
+            # Colored, bold prompt for the nix dev shell
+            # -----------------------------------------------------------------
+            export PS1='\[\033[1;36m\](nix:iommu)\[\033[0m\] \[\033[1;33m\]\w\[\033[0m\] \[\033[1;32m\]\$\[\033[0m\] '
+
+            BOLD=$'\033[1m'; CYAN=$'\033[1;36m'; GREEN=$'\033[1;32m'; RST=$'\033[0m'
+            echo "$CYAN==== RISC-V IOMMU verification env ====$RST"
+            echo "  ''${BOLD}verilator:$RST  $(verilator --version | head -n1)"
+            echo "  ''${BOLD}python:$RST     $(python --version)"
+            echo "  ''${BOLD}cocotb:$RST     $(python -c 'import cocotb; print(cocotb.__version__)')"
+            echo "  ''${BOLD}gcc:$RST        $(gcc --version | head -n1)"
+            echo "  ''${BOLD}pkg-config:$RST $(pkg-config --version)"
+            echo "  ''${BOLD}zlib:$RST       $(pkg-config --modversion zlib    2>/dev/null || echo 'NOT FOUND')  (cflags: $(pkg-config --cflags zlib 2>/dev/null))"
+            echo "  ''${BOLD}zstd:$RST       $(pkg-config --modversion libzstd 2>/dev/null || echo 'NOT FOUND')"
+            echo "  ''${BOLD}gtkwave:$RST    $(gtkwave --version 2>&1 | head -n1 || echo 'NOT FOUND')"
+            echo "$CYAN=======================================$RST"
           '';
         };
       });

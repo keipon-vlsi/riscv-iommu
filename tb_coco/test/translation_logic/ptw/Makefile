@@ -1,3 +1,10 @@
+# Makefile for PTW (rv_iommu_ptw_sv39x4_pc) unit verification — v4 compatible
+#
+# v4 changes:
+#   - rv_iommu_ptw_sv39x4_pc が pt_walker + walk_ctrl の sub-module を持つように
+#     なったので、 両者を VERILOG_SOURCES に追加
+#   - rv_iommu_pkg.sv はそのまま使うが、 walk_ctrl が import rv_iommu::* するので必須
+
 TOPLEVEL_LANG = verilog
 SIM           = verilator
 
@@ -17,11 +24,14 @@ EXTRA_ARGS += +incdir+$(REPO_ROOT)/packages/dependencies
 EXTRA_ARGS += --trace --trace-structs
 EXTRA_ARGS += -Wno-fatal
 
+# ── v4 PTW は sub-module を 2 つ持つので、 全部明示的にリストする ──
 VERILOG_SOURCES = \
     $(REPO_ROOT)/packages/dependencies/riscv_pkg.sv \
     $(REPO_ROOT)/packages/dependencies/axi_pkg.sv \
     $(REPO_ROOT)/packages/dependencies/lint_wrapper_pkg.sv \
     $(REPO_ROOT)/packages/rv_iommu/rv_iommu_pkg.sv \
+    $(REPO_ROOT)/rtl/translation_logic/ptw/rv_iommu_pt_walker.sv \
+    $(REPO_ROOT)/rtl/translation_logic/ptw/rv_iommu_walk_ctrl.sv \
     $(REPO_ROOT)/rtl/translation_logic/ptw/rv_iommu_ptw_sv39x4_pc.sv \
     $(MAKEFILE_DIR)tb_rv_iommu_ptw_sv39x4_pc_wrapper.sv
 
@@ -50,3 +60,4 @@ debug-paths:
 	@echo "REPO_ROOT    = $(REPO_ROOT)"
 	@echo "PYTHONPATH   = $(PYTHONPATH)"
 	@echo "COCOTB_TEST_MODULES = $(COCOTB_TEST_MODULES)"
+	

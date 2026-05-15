@@ -327,8 +327,8 @@ module rv_iommu_tw_sv39x4_pc #(
 
     // Guest page fault occurred during implicit 2nd-stage translation for 1st-stage translation
     logic   ptw_error_2S_int;
-    assign  is_implicit_o = (ptw_error_2S_int | (flush_cdw & ~is_ddt_walk));
-
+    // assign  is_implicit_o = (ptw_error_2S_int | (flush_cdw & ~is_ddt_walk));
+    assign is_implicit_o = ptw_error_2S_int | (flush_cdw & pdtw_active);
     // MSI PTW is active
     logic msiptw_active;
 
@@ -356,7 +356,9 @@ module rv_iommu_tw_sv39x4_pc #(
 
     // Fault reporting per DC.tc.DTF
     assign  report_fault_o    = (((ddtc_lu_hit & !dc_base.tc.dtf) |
-                                  (report_always | msi_write_error_i | (cdw_error & is_ddt_walk))) & trans_error_o);
+                                  (report_always | msi_write_error_i | (cdw_error & is_ddt_walk))
+                                  | (ptw_error & (is_ddt_walk))
+                                  ) & trans_error_o);
 
     // Update bus from PTW
     logic                       ptw_update;
@@ -844,6 +846,7 @@ module rv_iommu_tw_sv39x4_pc #(
         .ddtp_mode_i            (ddtp_i.iommu_mode.q),
         .en_stage2_i            (S2_en),
         .ptw_done_i             (cdw_done),
+        .ptw_error_2S_i         (ptw_error_2S_int),
         .flush_i                (flush_cdw),
         .pdt_ppn_i              (iotlb_up_2S_content.ppn),
         .cdw_implicit_access_o  (ddtw_implicit_access),
@@ -874,6 +877,7 @@ module rv_iommu_tw_sv39x4_pc #(
         .pdtp_ppn_i             (dc_base.fsc.ppn),
         .pdtp_mode_i            (dc_base.fsc.mode),
         .ptw_done_i             (cdw_done),
+        .ptw_error_2S_i         (ptw_error_2S_int),
         .flush_i                (flush_cdw),
         .pdt_ppn_i              (iotlb_up_2S_content.ppn),
         .cdw_implicit_access_o  (pdtw_implicit_access),
@@ -1109,8 +1113,9 @@ module rv_iommu_tw_sv39x4_pc #(
 
         priority case (1'b1)
             wrap_error:         cause_code_o = wrap_cause_code;
-            cdw_error:          cause_code_o = cdw_cause_code;
             ptw_error:          cause_code_o = ptw_cause_code;
+            cdw_error:          cause_code_o = cdw_cause_code;
+            // ptw_error:          cause_code_o = ptw_cause_code;
             msiptw_error:       cause_code_o = msiptw_cause_code;
             mrif_handler_error: cause_code_o = mrif_handler_cause_code;
             msi_write_error_i:  cause_code_o = rv_iommu::MSI_ST_ACCESS_FAULT;
@@ -1137,10 +1142,12 @@ module rv_iommu_tw_sv39x4_pc #(
         end
     end : iotlb_bad_gpaddr_compute
 
-    assign is_guest_pf_o = ptw_error_2S | (wrap_error & wrap_cause_is_guest);
+    assign is_guest_pf_o = (ptw_error_2S | ptw_error_2S_int) | (wrap_error & wrap_cause_is_guest);
 
-    assign bad_gpaddr_o  = ptw_error_2S
-                         ? ptw_bad_gpaddr
-                         : ((wrap_error & wrap_cause_is_guest) ? iotlb_bad_gpaddr : '0);
+    assign bad_gpaddr_o  = (ptw_error_2S | ptw_error_2S_int)
+                        ? ptw_bad_gpaddr                                              // 既にマスク済
+                        : ((wrap_error & wrap_cause_is_guest) 
+                            ? {iotlb_bad_gpaddr[riscv::SVX-1:2], 2'b00}                // ★ マスク追加
+                            : '0);
 
 endmodule

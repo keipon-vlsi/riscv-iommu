@@ -1,16 +1,19 @@
 // Copyright © 2023 Manuel Rodríguez & Zero-Day Labs, Lda.
-// Copyright © 2026 (PR-cdw-split v4.5: iotval2 を s2_target_gppn_q から駆動)
+// Copyright © 2026 (PR-cdw-split v4.6: pdt_gppn_late_q defensive capture)
 // SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
 //
-// Description: Walk Controller (= PTW orchestrator), v4.5
+// Description: Walk Controller (= PTW orchestrator), v4.6
+//
+//   v4.6 changes:
+//     - `pdt_gppn_late_q` register を追加: cdw_pdt_gppn_i が非ゼロになった瞬間に
+//       latch する防御的 register。 上位 (DDTW/PDTW → wrapper) で pdt_gppn の
+//       valid タイミングが snapshot より遅れる場合の workaround。
+//     - compute_s2_bad_gpaddr の WM_IMPLICIT_S2 で target_gppn=0 なら
+//       pdt_gppn_late_q を fallback として使用。
 //
 //   v4.5 changes:
 //     - compute_s2_bad_gpaddr で `impl_gppn_q` の代わりに `s2_target_gppn_q` を使用
-//         理由: WM_IMPLICIT_S2 で impl_gppn_q が 0 になる issue (= 上位 DDTW から
-//               cdw_pdt_gppn_i が snapshot タイミングで届いていない疑い) の回避。
-//         s2_target_gppn_q は全 walk_mode で「現在 S2 翻訳中の GPPN」 を統一保持
-//         する canonical signal で、 同じ値を表すが register が独立。
-//     - impl_gppn_q register は使われなくなるが、 互換のため残置 (= dead code)
+//         (= 効かず、 v4.6 で更に defensive 化)
 //
 //   v4.4 changes:
 //     - PH_S1 / PH_S2 leaf に R/W access permission check を追加
@@ -156,6 +159,12 @@ module rv_iommu_walk_ctrl
     logic                                       en_s1_q, en_s2_q;
     logic [riscv::GPPNW-1:0]                    impl_gppn_q;
 
+    // ── 防御的 late capture: cdw_pdt_gppn_i を非ゼロ時に latch ──────
+    //   v4.6: upstream で pdt_gppn が snapshot タイミングより遅れて valid に
+    //   なるケースの workaround。 PROC/ERROR 以外の state で cdw_pdt_gppn_i
+    //   が非ゼロになった瞬間に latch、 walk 中保持する。
+    logic [riscv::GPPNW-1:0]                    pdt_gppn_late_q;
+
     // ── S2 walk 中の「翻訳対象 gppn」 を保持 ─────────────────────────
     //   S2 walk は root → mid → leaf と 3 段降りるが、 全 level で同じ gppn
     //   の異なる bit segment (= [28:18] / [17:9] / [8:0]) を index に使う。
@@ -257,7 +266,10 @@ module rv_iommu_walk_ctrl
                     default: return '0;
                 endcase
             end
-            WM_IMPLICIT_S2: return {target_gppn, 12'b0};   // ★ target_gppn 使用
+            // v4.6: target_gppn (= s2_target_gppn_q) が 0 なら pdt_gppn_late_q を
+            // fallback として使う。 後者は cdw_pdt_gppn_i を非ゼロ時に late latch
+            // した値で、 upstream の timing skew に対応する。
+            WM_IMPLICIT_S2: return {(target_gppn != '0 ? target_gppn : pdt_gppn_late_q), 12'b0};
             default:        return '0;
         endcase
     endfunction
@@ -662,6 +674,7 @@ module rv_iommu_walk_ctrl
             en_s1_q        <= 1'b0;
             en_s2_q        <= 1'b0;
             impl_gppn_q       <= '0;
+            pdt_gppn_late_q   <= '0;
             s2_target_gppn_q  <= '0;
             cause_q           <= '0;
             is_2S_q           <= 1'b0;
@@ -692,6 +705,17 @@ module rv_iommu_walk_ctrl
                 en_s1_q     <= en_stage1_i;
                 en_s2_q     <= en_stage2_i;
                 impl_gppn_q <= cdw_pdt_gppn_i;
+            end
+
+            // ★ v4.6: 防御的 late capture
+            //   cdw_pdt_gppn_i が PROC/ERROR 以外の state で非ゼロになったら
+            //   pdt_gppn_late_q に latch。 何度でも上書き可能 (= 最新値を保持)。
+            //   walk 開始直後に cdw_pdt_gppn_i が valid になった場合、 snapshot
+            //   時には 0 で取れていても late_q には正しい値が入る。
+            if (cdw_pdt_gppn_i != '0
+                  && state_q != ST_PROC
+                  && state_q != ST_ERROR) begin
+                pdt_gppn_late_q <= cdw_pdt_gppn_i;
             end
         end
     end

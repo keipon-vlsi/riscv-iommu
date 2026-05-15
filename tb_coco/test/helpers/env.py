@@ -237,6 +237,9 @@ class IommuEnv:
                                     base_ppn=self._cq_base_ppn,
                                     log2sz=self._cq_log2sz)
             await self.cq.setup()
+        
+        # ---- logging ----
+        logging.getLogger("cocotb.axi").setLevel(logging.DEBUG)
 
         self.log.info("✓ env.setup() complete")
 

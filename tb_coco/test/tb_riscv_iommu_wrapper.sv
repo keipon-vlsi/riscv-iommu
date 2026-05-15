@@ -232,6 +232,16 @@ module tb_riscv_iommu_wrapper
     // =========================================================================
     output logic [NumIRQWires-1:0]     wsi_wires_o
 );
+    // ---------------------------------------------------------------
+    // Wave dump (= +trace plusarg で ON、 デフォルトは OFF)
+    // ---------------------------------------------------------------
+    initial begin
+        if ($test$plusargs("trace")) begin
+            $dumpfile("dump.vcd");
+            $dumpvars(0, tb_riscv_iommu_wrapper);
+            $display("[wave] dump.vcd started @ %0t", $time);
+        end
+    end
 
     // reg_bus typedef
     typedef logic [64-1:0]  reg_addr_t;

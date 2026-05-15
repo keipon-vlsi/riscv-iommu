@@ -212,45 +212,56 @@ map_s2_page = build_s2_walk
 
 
 def build_nested_walk(ram, pmm: PhysicalMemoryManager,
-                      s1_root_gppn: int, s2_root_ppn: int, iova: int,
+                      s1_root_ppn: int, s2_root_ppn: int, iova: int,
                       final_spa: int = None,
                       s1_leaf_flags: dict = None) -> int:
     """Lay out a full nested (S1+S2) translation for `iova`.
 
-    With both stages enabled, every S1 PTE fetch must be S2-translated first.
-    This builder:
-      1. Places the S1 root page in GPA space and adds an S2 mapping for it.
-      2. Allocates S1 L1 / L0 pages in GPA space and maps each via S2.
-      3. Writes the S1 root / L1 / leaf PTEs.
-      4. Allocates the final data page and maps its GPA to `final_spa` via S2.
+    ※ USER DESIGN (= PR-cdw-split v4) では「全 cache が SPA を保持」 する設計。
+      DDTW/PDTW が iosatp.ppn を事前に S2 翻訳済み SPA として walk_ctrl に渡すため、
+      walk_ctrl は **iosatp.ppn を SPA としてそのまま使う** (= 初期 S2 walk なし)。
+
+      よってこの helper は:
+        - **S1 root PT を SPA = s1_root_ppn << 12 に直接配置** (= S2 翻訳しない)
+        - S1 PTE 内の PPN フィールドは GPPN (= 各 NL / leaf PPN を S2 で翻訳)
+        - S2 PT は S1 中間 / leaf PT pages と final データページの GPPN だけ翻訳
+
+    Builder:
+      1. S1 root PT を SPA に直接配置 (= no S2 mapping for root)
+      2. S1 L1 page (GPPN 空間) を allocate、 S2 で SPA に翻訳
+      3. S1 L0 page も同様
+      4. 最終 data ページ (GPPN) を allocate、 S2 で `final_spa` に翻訳
+      5. S1 root → L1 → leaf の PTE を書く (PPN フィールドは GPPN)
 
     Args:
-        s1_root_gppn: GPA PPN of the S1 root. Assigned to iosatp.ppn by the DUT.
-        s2_root_ppn:  SPA PPN of the S2 root. Assigned to iohgatp.ppn.
-        iova:         39-bit input virtual address.
-        final_spa:    Desired host PA of the translated page. Alloc new if None.
+        s1_root_ppn:  S1 root PT の **SPA PPN** (= iosatp.ppn にそのまま使われる、
+                      user 設計では SPA 解釈)
+        s2_root_ppn:  S2 root PT の SPA PPN (= iohgatp.ppn)
+        iova:         39-bit input virtual address
+        final_spa:    最終 data ページの host PA。 None なら自動 alloc
 
     Returns:
-        The final SPA the translation should resolve to.
+        翻訳結果の最終 SPA
     """
     vpn2 = (iova >> 30) & 0x1FF
     vpn1 = (iova >> 21) & 0x1FF
     vpn0 = (iova >> 12) & 0x1FF
 
-    # 1. S2 mapping for the S1 root page
-    s1_root_spa = build_s2_walk(ram, pmm, s2_root_ppn, s1_root_gppn << 12)
+    # 1. S1 root PT は SPA に直接配置 (= USER DESIGN: 初期 S2 walk なし)
+    #    walk_ctrl は iosatp.ppn=s1_root_ppn から PA = s1_root_ppn<<12 を直接読む
+    s1_root_spa = s1_root_ppn << 12
 
-    # 2. S1 L1 page (in GPA), its S2 mapping, and S1 root -> L1 non-leaf PTE
+    # 2. S1 L1 page (GPPN 空間)、 S2 で SPA に翻訳、 S1 root -> L1 非-leaf PTE
     s1_l1_gppn = pmm.alloc_ppn()
     s1_l1_spa  = build_s2_walk(ram, pmm, s2_root_ppn, s1_l1_gppn << 12)
     ram.write(s1_root_spa + vpn2 * 8, PteFactory.non_leaf(ppn=s1_l1_gppn))
 
-    # 3. S1 L0 page
+    # 3. S1 L0 page (GPPN 空間)、 S2 で SPA に翻訳、 S1 L1 -> L0 非-leaf PTE
     s1_l0_gppn = pmm.alloc_ppn()
     s1_l0_spa  = build_s2_walk(ram, pmm, s2_root_ppn, s1_l0_gppn << 12)
     ram.write(s1_l1_spa + vpn1 * 8, PteFactory.non_leaf(ppn=s1_l0_gppn))
 
-    # 4. Final data page in GPA + S2 mapping + S1 leaf PTE
+    # 4. 最終 data ページ (GPPN 空間) + S2 マッピング + S1 leaf PTE
     final_gppn = pmm.alloc_ppn()
     if final_spa is None:
         final_spa = pmm.alloc_ppn() << 12
@@ -617,3 +628,4 @@ def check_iotlb_update(dut, expected_leaf_ppn: int,
         f"{prefix}leaf PPN mismatch: expected {hex(expected_leaf_ppn)}, "
         f"got {hex(actual_ppn)} (raw PTE={hex(pte_val)})"
     )
+    
