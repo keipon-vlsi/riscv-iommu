@@ -1,0 +1,1407 @@
+= IOMMU Microarchitecture Specification
+Kei Kawano <claude.kei.kansei@gmail.com>
+v0.1, 2026-05-18
+:doctype: book
+:toc: left
+:toclevels: 3
+:sectnums:
+:sectanchors:
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+[abstract]
+.Abstract
+--
+This document specifies the microarchitecture of the RISC-V IOMMU implementation
+authored for Tenstorrent pre-training TASK1. It describes the realized design
+choices — block decomposition, walker FSMs, IOATC organization, CSR layout, fault
+reporting, and verification surface — rather than re-stating the
+RISC-V IOMMU Architecture Specification v1.0. The document follows the
+4-layer ownership model (*Built*, *Adapted*, *Borrowed*, *Deferred*) so that the
+reader can evaluate not only the design itself but also the author's contribution
+boundary inside it.
+--
+
+== Introduction
+
+=== Purpose
+
+This document specifies the microarchitecture of a RISC-V IOMMU IP whose RTL
+lives in `rtl/` of this repository. It is written for a senior digital-design
+reviewer at Tenstorrent who needs to evaluate, in one read, both *the design
+realized in this RTL* and *the author's role inside that design*. The document
+therefore mixes two threads in every section: how the block works, and which
+layer of the 4-layer ownership model (see <<implementation-scope>>) the block
+belongs to.
+
+This is not a re-statement of the RISC-V IOMMU Architecture Specification v1.0.
+Where behavior follows the architectural spec, that spec is cited rather than
+copied; this document focuses on the realization-specific choices: block
+decomposition, walker FSMs, IOATC organization, register-map binding,
+fault-reporting path, and verification surface.
+
+=== Scope
+
+[cols="1,3", options="header"]
+|===
+| Item | Coverage in this IP
+
+| Address translation modes  | Sv39 first-stage (S1) and Sv39x4 second-stage
+                                (S2). Single-stage S1, single-stage S2,
+                                nested S1+S2, and Bare are all exercised.
+| Address width              | Sv39 / Sv39x4 (39-bit VA, 41-bit GPA, 56-bit PA).
+| Endianness                 | Little-endian only.
+| Super-pages                | 4 KiB only in the actively verified flow. 2 MiB
+                                and 1 GiB are recognized in PTW commit logic
+                                (`walk_ctrl.update_*_2M`/`_1G`) but not in the
+                                main reference-vector campaign for TASK1.
+| Process Context (PC)       | Implemented end-to-end. PDT walk (PDTW), PDTC,
+                                S1 from `pc.fsc.mode` are all live.
+| Device Context (DC) format | Base format (`dc_base_t`); extended format
+                                (`dc_ext_t`, MSI-aware) is in the RTL but is
+                                exercised only by MSI tests, which currently
+                                fault on S1.
+| MSI translation            | Basic translate (`MSI_FLAT_ONLY` capability) is
+                                wired; current verification does not yet pass
+                                the success path (see <<verification>>).
+                                MRIF mode is *Deferred*.
+| Interrupt generation       | WSI line implemented and parameterized
+                                (`N_INT_VEC`). MSI generation is in the RTL
+                                from Zero Day Labs.
+| HPM                        | *Deferred*. `N_IOHPMCTR = 0` for TASK1.
+| Debug interface            | Not exercised in TASK1 (`InclDBG = 0`).
+| AXI boundary check         | Not exercised in TASK1 (`InclBC = 0`).
+|===
+
+NOTE: The TASK1 deliverable boundary is intentionally narrow. The IP supports
+more (MRIF, HPM, ATS, debug, etc.) than TASK1 verifies, because the RTL is
+inherited from the Zero Day Labs open-source IP — see <<implementation-scope>>.
+
+=== References
+
+* RISC-V IOMMU Specification v1.0,
+  https://github.com/riscv-non-isa/riscv-iommu
+* RISC-V Privileged Architecture v1.13 (Sv39, H-extension, Svadu)
+* AMBA AXI Protocol Specification IHI 0022 (issue L)
+* Zero-Day Labs RISC-V IOMMU IP (`riscv-iommu`), upstream of this fork
+* `libiommu` (ved-rivos) — reference model used to generate golden vectors
+* In-repo documentation: `doc/spec/`, `doc/modules/`, `doc/design-log.md`
+
+[[terminology]]
+=== Terminology and Acronyms
+
+[cols="1,3", options="header"]
+|===
+| Term | Meaning
+
+| IOVA           | I/O Virtual Address. Address as seen at the translation
+                   request port (`dev_tr_req_i.ar.addr`/`aw.addr`).
+| GPA / GPPN     | Guest Physical Address / Guest Physical Page Number.
+                   Output of S1 translation, input of S2 translation.
+| SPA            | Supervisor Physical Address. Final translated address.
+| DC / PC        | Device Context / Process Context — per-device and
+                   per-process configuration loaded from memory.
+| DDT / PDT      | Device / Process Directory Table (in memory).
+| DDTW / PDTW    | Device / Process Directory Walker (RTL block).
+| DDTC / PDTC    | Device / Process Directory Cache (RTL block).
+| IOTLB-S1 / -S2 | First-stage / Second-stage IOTLB (this implementation
+                   splits the unified IOTLB into two caches).
+| PTW            | Page Table Walker. Composed of *PTW-Ctrl* and *PTW-Walker*.
+| PTW-Ctrl       | Orchestration FSM inside the PTW (`rv_iommu_walk_ctrl.sv`).
+| PTW-Walker     | Pure AXI read engine inside the PTW
+                   (`rv_iommu_pt_walker.sv`).
+| MSI PTW        | MSI Page Table Walker (`rv_iommu_msiptw.sv`).
+| MRIF / MRIFC   | Memory-Resident Interrupt File / its cache (out of scope).
+| CQ / FQ        | Command Queue / Fault Queue (in-memory, software interface).
+| WSI / MSI IG   | Wire-Signaled Interrupt / Message-Signaled Interrupt
+                   generator.
+| IOATC          | IO Address-Translation Cache — generic term covering
+                   IOTLB-S1, IOTLB-S2, DDTC, PDTC, MRIFC.
+| ZDL            | Zero Day Labs — origin of the upstream RTL.
+| TASK1 / TASK2  | Tenstorrent pre-training deliverable phases.
+|===
+
+== Implementation Overview
+
+=== System Context
+
+The IOMMU sits between bus-master devices (DMA engines, accelerators) and the
+system interconnect. From the IOMMU's perspective there are four AXI ports
+(see <<external-interfaces>>): a slave port that receives translation requests
+from devices, a master port that forwards translated requests to the
+interconnect, a master port for implicit memory access to data structures
+(DDT, PDT, page tables, CQ, FQ, MSI generation), and a slave AXI4-Lite port
+through which software programs the IOMMU.
+
+[source]
+----
+   ┌─────────────┐   IOVA          ┌────────────────────┐    SPA   ┌─────────────┐
+   │ DMA device  │ ────dev_tr────► │     IOMMU TOP      │ ──comp─► │ Interconnect│
+   │ (master)    │ ◄───response─── │  (riscv_iommu.sv)  │ ◄────────│ + DRAM      │
+   └─────────────┘                 │                    │   ds_*    └─────────────┘
+                                   │  PTW / CDW / CQ /  │ ──────────► DRAM (impl)
+                                   │  FQ / MSIIG        │ ◄──────────
+                                   │                    │
+   ┌─────────────┐   AXI-Lite     │                    │
+   │  CPU / SW   │ ────prog─────► │                    │ ─── wsi[N] ─► PLIC/APLIC
+   └─────────────┘ ◄───response── │                    │
+                                   └────────────────────┘
+----
+
+[[implementation-scope]]
+=== Implementation Scope (4-Layer Ownership)
+
+The IP combines work from multiple sources. The 4-layer ownership map below
+declares, for every major block, what the author personally claims. The
+labels are:
+
+[horizontal]
+*Built*::      Designed, implemented, and verified end-to-end by the author.
+*Adapted*::    Design decision is the author's. Implementation was co-built —
+               typically a refactor of the ZDL open-source code, with AI
+               assistance for some boilerplate. All such code was reviewed,
+               integrated, and verified by the author.
+*Borrowed*::   Used as-is from Zero Day Labs.
+*Deferred*::   Set aside for TASK2 or explicitly out of TASK1 scope.
+
+[cols="2,1,3", options="header"]
+|===
+| Block / Subsystem                                  | Layer    | Notes
+
+| Top-level FSM (READ / WRITE / IDLE arbitration)   | Borrowed | `riscv_iommu.sv`, unchanged from ZDL.
+| Translation Wrapper (`rv_iommu_tw_sv39x4_pc`)      | Adapted  | Replaced unified IOTLB with split S1 / S2 caches; new hit-combine + per-cache update enables.
+| *PTW split*: PTW-Ctrl + PTW-Walker                 | *Built*  | Author's decomposition. FSM, edge-triggered init, snapshot logic written from scratch (`walk_ctrl.sv`, `pt_walker.sv`).
+| *CDW split*: DDTW + PDTW + AXI mux                 | *Built*  | Replaced ZDL's combined CDW with separate walkers; v4 PROC-state FSM; AXI mux serializes them.
+| *IOTLB-S1 / IOTLB-S2 (split)*                      | *Built*  | New `iotlb_s1.sv`, `iotlb_s2.sv` with stage-specific tags and update enables. Replaces unified `iotlb_sv39x4`.
+| DDTC / PDTC                                         | Borrowed | `rv_iommu_ddtc.sv`, `rv_iommu_pdtc.sv` reused as-is; depths re-parameterized.
+| MSI PTW (`rv_iommu_msiptw`)                        | Borrowed | Two-FSM MSI-FLAT + MSI-MRIF; only MSI-FLAT branch is in scope for TASK1.
+| MRIF Handler + MRIFC                                | Deferred | `MSITrans = MSI_FLAT_MRIF` path. Out of TASK1.
+| Register map (`rv_iommu_regmap.sv`, ~3.5k LoC)      | Borrowed | LowRISC `reggen`-generated; unchanged.
+| SW IF Wrapper (`rv_iommu_sw_if_wrapper.sv`)        | Borrowed | Aggregates regmap + CQ + FQ + IG.
+| CQ / FQ handler                                     | Borrowed | `rv_iommu_cq_handler.sv`, `rv_iommu_fq_handler.sv`.
+| WSI / MSI Interrupt Generation                      | Borrowed | Plain combinational WSI; MSI-IG is a 3-state AXI writer.
+| External AXI plumbing (`ds_if`, `prog_if`, `axi4_bc`, `ign_slv`) | Borrowed | Used as-is.
+| HPM (`rv_iommu_hpm.sv`)                             | Deferred | `N_IOHPMCTR = 0` for TASK1.
+| Debug register interface                            | Deferred | `InclDBG = 0` for TASK1.
+| *Verification harness (cocotb 2.0 + Verilator 5)*   | *Built*  | Wrapper, MockMem, replay infra (`tb_coco/test/**`), 19 reference-vector generators (`reference/gen_vectors/gen_*.c`), `diff_logs.py`.
+|===
+
+==== AI Assistance Disclosure
+
+The author used AI assistance (Anthropic Claude) for two narrow purposes inside
+the *Adapted* and *Built* layers:
+
+. Generating boilerplate (port-list scaffolding, repeated struct typedefs,
+  enumeration of always_comb default-assignment branches) inside the split
+  blocks (PTW-Ctrl, IOTLB-S1/S2, DDTW/PDTW, CDW mux, test-vector C generators).
+. Mechanical regenerations after design pivots (e.g., rewriting an `always_comb`
+  block when an FSM state was added).
+
+Every AI-touched line was reviewed against the architectural intent the author
+had already fixed (block boundary, FSM shape, signal naming), integrated
+manually, and verified against the libiommu golden vectors. Decisions about
+what to split, what to cache, what to invalidate, and which FSM states to
+introduce are the author's own and predate the AI use.
+
+The author does *not* claim to have written every line of the *Borrowed* layer;
+those modules are used at integration level only, with sufficient understanding
+to wire them correctly and debug the integration but not to claim deep
+expertise on every micro-decision inside them.
+
+=== Top-Level Block Diagram
+
+[source]
+----
+┌────────────────────────────── riscv_iommu (TOP) ──────────────────────────────┐
+│                                                                                │
+│  dev_tr_req_i ──► [TOP FSM]                                          ┌──── ds_req_o
+│                    READ/WRITE/IDLE                                   │       (master)
+│                       │                                              │
+│                       ▼                                              │
+│              ┌─── rv_iommu_translation_wrapper ────────────────┐     │
+│              │                                                 │     │
+│              │       ┌─ tw_sv39x4_pc (orchestration) ────────┐ │     │
+│              │       │  ┌──────┐  ┌──────┐  ┌──────┐         │ │     │
+│              │       │  │ DDTC │  │ PDTC │  │MRIFC │         │ │     │
+│              │       │  └──────┘  └──────┘  └──────┘         │ │     │
+│              │       │   miss│      miss│                    │ │     │
+│              │       │       ▼          ▼                    │ │     │
+│              │       │  ┌────────┐  ┌────────┐               │ │     │
+│              │       │  │  DDTW  │  │  PDTW  │ ──(mux)──┐    │ │     │
+│              │       │  │ (FSM)  │  │ (FSM)  │          │    │ │     │
+│              │       │  └────────┘  └────────┘          │    │ │     │
+│              │       │                                  ▼    │ │     │
+│              │       │  ┌─────────────┐    ┌──────────────┐  │ │     │
+│              │       │  │ IOTLB-S1    │    │  IOTLB-S2    │  │ │     │
+│              │       │  └─────────────┘    └──────────────┘  │ │     │
+│              │       │   miss│  ▲             miss│  ▲       │ │     │
+│              │       │       ▼  │update            ▼  │update│ │     │
+│              │       │   ┌───────────────────────────────┐   │ │     │
+│              │       │   │ PTW-Ctrl  ──►  PTW-Walker     │   │ │     │
+│              │       │   │ (FSM)         (AXI read eng)  │   │ │     │
+│              │       │   └───────────────────────────────┘   │ │     │
+│              │       │             │                         │ │     │
+│              │       │             ▼                         │ │     │
+│              │       │       ┌──────────┐                    │ │     │
+│              │       │       │ MSI PTW  │                    │ │     │
+│              │       │       └──────────┘                    │ │     │
+│              │       └──────────────────────────────────────┘ │     │
+│              │                                                 │     │
+│              └──────────────────────────┬──────────────────────┘     │
+│                                         │ spaddr, trans_valid/error  │
+│                                         ▼                            │
+│       ┌────────── axi_demux ──────────┐                              │
+│       │ select=01 → comp_if (master)  │ ── dev_comp_req_o ─►         │
+│       │ select=00 → axi_err_slv       │                              │
+│       │ select=10 → rv_iommu_ign_slv  │                              │
+│       └───────────────────────────────┘                              │
+│                                                                       │
+│  prog_req_i ──► rv_iommu_prog_if ──► rv_iommu_sw_if_wrapper          │
+│                                       │  rv_iommu_regmap              │
+│                                       │  rv_iommu_cq_handler ─────────┤ (shares ds_req_o)
+│                                       │  rv_iommu_fq_handler ─────────┤
+│                                       │  rv_iommu_wsi_ig ──► wsi_wires_o
+│                                       └  rv_iommu_msi_ig ─────────────┤
+│                                                                       │
+│                          rv_iommu_ds_if (5-port AXI arbiter) ─► ds_req_o
+└───────────────────────────────────────────────────────────────────────┘
+----
+
+Notes on the diagram:
+
+* All five internal AXI masters (PTW, CDW-mux, MSI PTW, MRIF handler, CQ, FQ,
+  MSI IG) converge in `rv_iommu_ds_if`, which is a fixed-priority arbiter on
+  AR/AW with `stream_arbiter`.
+* `axi_err_slv` (PULP) returns SLVERR for translations rejected by the IOMMU
+  so that the requesting device still completes the AXI transaction cleanly.
+* The "ignore slave" path (`rv_iommu_ign_slv`) only exists when
+  `MSITrans = MSI_FLAT_MRIF`. It absorbs MRIF writes the IOMMU consumes
+  internally. For TASK1 (`MSI_DISABLED` in default flow) this path is dead
+  silicon.
+
+=== Design Philosophy
+
+Three principles drove every author-owned decision in this IP.
+
+. *Verification-friendly modularity.* The ZDL design baked the page-table walk,
+  the AXI engine, A/D checks, and permission checks into a single PTW. Splitting
+  it into *PTW-Ctrl* (orchestration FSM) and *PTW-Walker* (pure AXI read
+  engine) made each block testable through `valid/ready` handshakes alone, so
+  that a unit testbench can drive `walker_req_*` directly without standing up
+  a memory model. The same logic motivates splitting CDW into DDTW+PDTW and
+  IOTLB into S1+S2: smaller blocks have smaller test surfaces and faster
+  failure triage.
+
+. *Forward-compatibility with TASK2.* Each split has a TASK2 follow-on:
++
+[cols="2,3", options="header"]
+|===
+| Today (TASK1)                             | TASK2 follow-on
+| `xIOTLB_ENTRIES = 1` placeholder         | Real associative cache with replacement policy
+| `xDDTC_ENTRIES = 1`, `xPDTC_ENTRIES = 1` | Same
+| `PTW-Walker` issues one AR at a time      | Out-of-order multi-walk scheduling on top of the same Walker
+| `cdw_axi_mux` enforces DDTW/PDTW mutual exclusion | Concurrent walks once IOTLBs become real caches
+|===
++
+Splitting the modules now means TASK2 can add the cache replacement, hazard
+detection, and multi-walk scheduling *without re-cutting the block
+boundaries*.
+
+. *Honest scoping.* When something cannot be finished cleanly within TASK1,
+  it is left as a *single-entry placeholder* with the full lookup interface
+  in place (so the integration is real) rather than as a half-finished
+  multi-entry cache that would mask correctness bugs. The same principle
+  applies to MSI translation (basic translate hooked up; MRIF deferred) and
+  to HPM (`N_IOHPMCTR = 0` — feature absent rather than half-built).
+
+[[external-interfaces]]
+== External Interfaces
+
+The top module exposes four AXI interfaces, a clock/reset pair, and an
+interrupt-wire output bus. Signal-level details (struct types) live in
+`riscv_iommu.sv:80-100` and in `packages/dependencies/lint_wrapper_pkg.sv`.
+
+=== Programming IF (AXI4-Lite, Subordinate)
+
+* Ports: `prog_req_i` (`axi_req_slv_t`), `prog_resp_o` (`axi_rsp_slv_t`).
+* Address window: 4 KiB-aligned, 12-bit offset is consumed inside
+  `rv_iommu_regmap`. Above the 4 KiB window the address is don't-care.
+* Width: 32-bit data path. The regmap pairs `_L` / `_H` offsets for 64-bit
+  CSRs (e.g., `IOMMU_DDTP_OFFSET_L = 12'h10`, `_H = 12'h14`).
+* Implementation: `rv_iommu_prog_if` converts AXI4-Lite to the LowRISC
+  RegBus protocol expected by the generated regmap.
+
+=== Translation Request IF (AXI, Subordinate)
+
+* Ports: `dev_tr_req_i` (`axi_req_iommu_t`), `dev_tr_resp_o` (`axi_rsp_t`).
+* DVM extension fields (vs. plain AXI):
++
+[cols="1,1,2", options="header"]
+|===
+| Field          | Width | Meaning
+| `AxMMUSID`     | 24    | `device_id` for context lookup
+| `AxMMUSSID`    | 20    | `process_id` for PC lookup
+| `AxMMUSSIDV`   | 1     | The request carries a valid `process_id`
+|===
+* Hold rule: per top-of-file note in `rv_iommu_tw_sv39x4_pc.sv:30-34`, the
+  device *must* hold `ar_valid`/`aw_valid` (and therefore `req_trans_i` inside
+  the wrapper) high until either `trans_valid` or `trans_error` returns,
+  because the IOTLB-hit signal is gated by `req_trans_i`.
+* Concurrency: serial. The top FSM (`riscv_iommu.sv:110`) only accepts one
+  AR or AW at a time (AR is prioritized over AW).
+
+=== Completion IF (AXI, Manager)
+
+* Ports: `dev_comp_req_o`, `dev_comp_resp_i`.
+* The IOMMU substitutes the translated SPA into `AxADDR` and forwards the
+  rest of the AXI channels unchanged. R/W/B channels are routed by the
+  internal `axi_demux`.
+* On translation error the demux switches the channel to a PULP `axi_err_slv`
+  so the device sees a clean AXI handshake with SLVERR.
+
+=== Data Structures IF (AXI, Manager)
+
+* Ports: `ds_req_o`, `ds_resp_i`.
+* Five internal masters compete on AR (and three on AW): PTW, CDW (DDTW or
+  PDTW, mutually exclusive), MSI PTW, MRIF handler, CQ, FQ, MSI IG. They are
+  arbitrated by `rv_iommu_ds_if` (`stream_arbiter`, priority order).
+* All implicit reads use 8-byte beats. PTW-Walker uses `BURST_FIXED, len=0`
+  (one-shot read) by historical compatibility with the ZDL design; DDTW/PDTW
+  use `BURST_INCR` because DC/PC fields span multiple beats.
+
+=== Clock and Reset
+
+* Single clock domain (`clk_i`). All flops are synchronous to the rising edge.
+* Reset is asynchronous active-low (`rst_ni`). All FSMs initialize to IDLE
+  and all `_q` state registers clear to '0' on reset.
+
+=== Interrupt Outputs
+
+* `wsi_wires_o[N_INT_VEC-1:0]`. Combinationally driven by `rv_iommu_wsi_ig`
+  from the `intp_*` / `intv_*` arrays. When `fctl.wsi = 1`, source `s` raises
+  the wire indexed by `intv_i[s]`. Wires are level-sensitive; they drop when
+  the corresponding `ipsr` bit is cleared by software.
+
+== Internal Block Specifications
+
+Each block follows the template:
+
+* *Purpose* — what the block does.
+* *Interfaces* — top-level ports of interest.
+* *Internal structure* — FSM, pipeline, key registers.
+* *Parameters* — build-time knobs.
+* *Notes* — author judgment, scoping caveats, layer.
+
+=== PTW: PTW-Ctrl + PTW-Walker
+
+*Ownership layer:* Built.
+
+==== Purpose
+
+Walk the (S1, S2) page tables in memory for a given IOVA and produce the
+final S1 leaf PTE, S2 leaf PTE, super-page flags, and (`vpn, pscid, gscid`)
+key used by IOTLB-S1 / -S2 updates. Also serves implicit S2 walks requested
+by DDTW / PDTW when those walkers need to translate a DC/PC pointer.
+
+==== Interfaces
+
+PTW-Ctrl (`rv_iommu_walk_ctrl.sv`)
+
+[cols="1,1,3", options="header"]
+|===
+| Port                | Dir | Meaning
+| `init_i`            | in  | Normal translation trigger (edge-detected with `cdw_implicit_access_i`)
+| `cdw_implicit_access_i` | in | Implicit S2 walk requested by DDTW/PDTW
+| `iova_i`, `is_store_i`, `is_rx_i`, `priv_lvl_i`, `sum_i` | in | Request payload
+| `en_stage1_i`, `en_stage2_i` | in | Per-stage enables (= S1_en / S2_en)
+| `iosatp_ppn_i`, `iohgatp_ppn_i` | in | PT root pointers (from DC / PC)
+| `cdw_pdt_gppn_i`    | in  | GPPN of a DC/PC pointer (used by implicit walk)
+| `walker_req_*`, `walker_rsp_*` | in/out | Handshake to PTW-Walker
+| `update_iotlb_o`, `update_*_2M/1G_o`, `update_*_content_o` | out | IOTLB write bus
+| `ptw_done_o`, `pdt_ppn_o` | out | Completion signal to DDTW/PDTW
+| `ptw_error_o`, `ptw_error_2S_o`, `cause_code_o`, `bad_gpaddr_o` | out | Fault outputs
+|===
+
+PTW-Walker (`rv_iommu_pt_walker.sv`) is a pure AXI read engine with one
+request port (`req_valid_i`, `req_addr_i`, `req_ready_o`) and one response
+port (`rsp_valid_o`, `rsp_data_o`, `rsp_error_o`, `rsp_ready_i`).
+
+==== Internal Structure
+
+PTW-Walker FSM (3 states, `rv_iommu_pt_walker.sv:45-50`):
+
+[source]
+----
+ST_IDLE ──req_valid_i──► ST_ISSUE_AR ──ar_ready──► ST_WAIT_R ──r_valid & rsp_ready──► ST_IDLE
+----
+
+* AXI defaults: `ar.id = 0x0`, `ar.size = 3'b011` (8 byte), `ar.len = 0`,
+  `ar.burst = BURST_FIXED` (`pt_walker.sv:88-92`). A one-line comment in the
+  RTL notes "BURST_FIXED" was retained for compatibility with the historical
+  ZDL behavior.
+* `r_ready` is asserted in `ST_WAIT_R` regardless of whether `r_valid` has
+  arrived yet (allowed by AXI; chosen to match memory models that expect
+  `r_ready` first).
+
+PTW-Ctrl FSM (5 states, `rv_iommu_walk_ctrl.sv:115-121`):
+
+[source]
+----
+ST_IDLE  ── init_rising_edge ──► ST_ISSUE
+ST_ISSUE ── walker_req_ready ──► ST_WAIT
+ST_WAIT  ── walker_rsp_valid ──► ST_PROC
+ST_PROC  ── (commit | advance) ─► ST_IDLE | ST_ISSUE
+ST_PROC  ── (fault detected) ───► ST_ERROR
+ST_ERROR ──────────────────────► ST_IDLE
+----
+
+Two orthogonal axes superimpose on the 5 states:
+
+[cols="1,3", options="header"]
+|===
+| Axis        | Values
+| `phase_q`   | `PH_S1`, `PH_S2`  (which stage the current memory access belongs to)
+| `walk_mode_q` | `WM_SINGLE_S1`, `WM_SINGLE_S2`, `WM_NESTED`, `WM_IMPLICIT_S2`
+|===
+
+The (state, phase, walk_mode) triple captures every walk shape this IP
+supports. ST_PROC is the *only* state that applies semantic checks (V, R/W,
+A/D, U, reserved bits, super-page mis-alignment, ...), so by inspecting that
+single state a reviewer can audit the entire correctness story.
+
+Other Ctrl-side details:
+
+* *Edge-triggered `init`*: `init_i` is asserted level by the wrapper, but
+  PTW-Ctrl captures only the rising edge (`init_rising_edge` at
+  `walk_ctrl.sv:182`). This makes the FSM idempotent against held inputs.
+* *Snapshot at init*: `iova`, `is_store`, `is_rx`, `priv_lvl`, `sum`,
+  `en_s1`, `en_s2`, `impl_gppn` are captured into `*_q` registers at the
+  init edge and not re-sampled mid-walk. (`walk_ctrl.sv:154-157`).
+* *Per-stage levels*: `s1_lvl_q`, `s2_lvl_q` decrement as the walk descends.
+  Super-page detection observes the `lvl` at the moment of leaf commit.
+* *Per-check gates*: `ENABLE_PTE_RESERVED_CHECK`, `ENABLE_PTE_MISALIGN_CHECK`,
+  `ENABLE_PTE_AD_CHECK`, `ENABLE_PTE_U_CHECK`, `ENABLE_PTE_PERM_CHECK` are
+  build-time parameters that let the verifier turn checks off one at a time
+  while bisecting bugs. All default to `1` in production.
+
+==== Parameters
+
+[cols="1,1,3", options="header"]
+|===
+| Name                              | Default | Purpose
+| `ENABLE_PTE_RESERVED_CHECK`        | 1       | Fault on non-zero reserved bits of PTE.
+| `ENABLE_PTE_MISALIGN_CHECK`        | 1       | Fault on super-page leaf with non-zero LSBs of PPN.
+| `ENABLE_PTE_AD_CHECK`              | 1       | Fault on A=0 (load), D=0 (store). HW A/D update not supported.
+| `ENABLE_PTE_U_CHECK`               | 1       | IOMMU is always user-mode → U=0 PTE faults; G-stage always requires U=1.
+| `ENABLE_PTE_PERM_CHECK`            | 1       | Cross-check load/store vs. R/W in leaf PTE.
+|===
+
+==== Notes
+
+The split into PTW-Ctrl + PTW-Walker means the AXI-side debugging
+(burst type, RRESP handling) is contained in 145 lines of `pt_walker.sv`,
+while the semantic-check debugging is contained in `walk_ctrl.sv`. This
+separation was decisive in the BURST_FIXED hang debug (see `doc/design-log.md`
+and the project's worklog).
+
+[VERIFY: confirm that BURST_FIXED was reverted-to (not introduced by author) — the
+RTL header in `pdtw.sv` describes a v4.3 revert from FIXED back to INCR and
+calls v4.2's FIXED change "誤り" (wrong), but `pt_walker.sv:92` still uses
+FIXED with the comment "FIXED (旧設計準拠)". The reasonable interpretation is
+that PTW-Walker keeps FIXED for one-PTE reads (no advantage to INCR with
+len=0), while DDTW/PDTW need INCR for multi-beat DC/PC reads. The two
+choices are intentional, not an inconsistency.]
+
+[[block-iotlb]]
+=== IOTLB-S1 and IOTLB-S2 (Split)
+
+*Ownership layer:* Built.
+
+==== Purpose
+
+Cache leaf PTEs so that subsequent translations with the same `(pscid, gscid,
+vpn)` key complete without a memory walk. The cache is split into two
+independent structures: S1 holds first-stage leaves (`pte_t` content) tagged
+by `(pscid, gscid, vpn)`; S2 holds second-stage leaves and, in the MSI path,
+also the synthetic MSI PTE tagged with `is_msi`.
+
+==== Interfaces
+
+Both modules share a similar shape; the differences live in the tag struct
+and the update payload.
+
+IOTLB-S1 (`rv_iommu_iotlb_s1.sv`)
+
+[cols="1,1,2", options="header"]
+|===
+| Port              | Dir | Meaning
+| `lookup_i`, `lu_iova_i`, `lu_pscid_i`, `lu_gscid_i`, `en_1S_i`, `en_2S_i` | in | Lookup
+| `lu_hit_o`, `lu_miss_o`, `lu_1S_2M_o`, `lu_1S_1G_o`, `lu_1S_content_o` | out | Lookup result
+| `update_i`, `up_*_2M/1G_i`, `up_en_1S_i`, `up_en_2S_i`, `up_vpn_i`, `up_pscid_i`, `up_gscid_i`, `up_1S_content_i` | in | Insert
+| `flush_vma_i`, `flush_gvma_i`, `flush_av_i`, `flush_gv_i`, `flush_pscv_i`, `flush_vpn_i`, `flush_gscid_i`, `flush_pscid_i` | in | Invalidate
+|===
+
+IOTLB-S2 (`rv_iommu_iotlb_s2.sv`) adds: `up_is_msi_i`, `lu_is_msi_o`, and
+the tag carries a pre-computed `gppn` for partial GVMA invalidation.
+
+==== Internal Structure
+
+* Fully associative; tag and content arrays sized by
+  `IOTLB_S1_ENTRIES` / `IOTLB_S2_ENTRIES`.
+* Tag struct (S1): `{pscid, gscid, vpn2, vpn1, vpn0, is_1S_2M, is_1S_1G,
+  en_1S, en_2S, valid}`.
+* Tag struct (S2): `{pscid, gscid, vpn2, vpn1, vpn0, is_2S_2M, is_2S_1G,
+  is_msi, en_1S, en_2S, gppn, valid}`.
+* Hit combining lives in the wrapper (`tw_sv39x4_pc.sv:281-291`):
++
+[source,systemverilog]
+----
+assign msi_route_active = s2_iotlb_hit & s2_iotlb_lu_is_msi;
+assign s2_required = S2_en | msi_route_active;
+
+assign iotlb_lu_hit = iotlb_access
+                    & (S1_en       ? s1_iotlb_hit : 1'b1)
+                    & (s2_required ? s2_iotlb_hit : 1'b1)
+                    & (S1_en | S2_en | msi_route_active);
+----
+
+==== Parameters
+
+`IOTLB_S1_ENTRIES`, `IOTLB_S2_ENTRIES` — depth of each cache.
+
+==== Notes
+
+WARNING: This integration uses `xIOTLB_ENTRIES = 1` *single-entry
+placeholders*. The cache modules expose the full lookup / update / flush
+interface, but a 1-entry cache trivially admits one entry at a time and
+overwrites on every miss. This is deliberate: it lets the rest of the IOMMU
+pipeline be verified end-to-end without committing to a replacement policy.
+*Sizing, replacement (LRU vs. random), and victim-buffer choice are TASK2
+material.* The parameter defaults in `rv_iommu_tw_sv39x4_pc.sv` are still 4
+from the ZDL upstream; the integration-time override is what makes the
+caches single-entry in this build. [VERIFY: confirm with build script that
+the top-level integration is overriding to 1; if not, document the default
+that is actually shipped.]
+
+=== CDW Container: DDTW + PDTW + AXI mux
+
+*Ownership layer:* Built.
+
+==== Purpose
+
+Walk the Device Directory Table (and, when `pdtv=1`, the Process Directory
+Table) to produce a Device Context / Process Context for the current
+request, and write them into DDTC / PDTC.
+
+==== Interfaces (per walker)
+
+[cols="1,1,2", options="header"]
+|===
+| Port                       | Dir | Meaning
+| `init_i`                   | in  | Edge-detected walk start
+| `req_did_i` (+ `req_pid_i` for PDTW) | in | Lookup key
+| `ddtp_ppn_i`, `ddtp_mode_i` (DDTW only) | in | DDT root pointer
+| `pdtp_ppn_i`, `pdtp_mode_i` (PDTW only) | in | PDT root pointer (from DC)
+| `mem_req_o`, `mem_resp_i`  | out/in | AXI master (joined by `cdw_axi_mux`)
+| `update_dc_o` / `update_pc_o`, `up_did_o`, `up_pid_o`, `up_*_content_o` | out | Cache fill
+| `active_o`, `error_o`, `cause_code_o` | out | Status
+| `cdw_implicit_access_o`, `pdt_gppn_o` | out | Trigger implicit S2 walk in PTW
+|===
+
+==== Internal Structure
+
+Both walkers share the same 5-state FSM (added the *PROC* state in v4):
+
+[source]
+----
+ST_IDLE ── init_rising_edge ──► ST_ISSUE
+ST_ISSUE ── ar_ready ──────────► ST_WAIT
+ST_WAIT  ── r_valid & rlast ──► ST_PROC
+ST_PROC  ── advance | commit ─► ST_ISSUE | ST_IDLE
+ST_PROC  ── fault detected ───► ST_ERROR
+ST_ERROR ──────────────────── ► ST_IDLE
+----
+
+Phase encoding differs:
+
+* DDTW phases (`rv_iommu_ddtw.sv:70-76`): `PH_NL_S1`, `PH_LEAF_S1`,
+  `PH_LEAF_S2` (no `PH_NL_S2` — DDT non-leaves do not need S2 translation;
+  only the leaf `dc.fsc.PPN` is S2-translated).
+* PDTW phases (`rv_iommu_pdtw.sv:60-66`): `PH_NL_S1`, `PH_NL_S2`,
+  `PH_LEAF_S1`, `PH_LEAF_S2` (PDT non-leaves *do* need S2 in nested mode).
+
+`cdw_axi_mux` (`rv_iommu_cdw_axi_mux.sv`) collapses the two walker AXI
+masters into one external port. The mux relies on the orchestrator
+guaranteeing mutual exclusion (`ddtw_active` xor `pdtw_active`); if both
+fire, DDTW wins deterministically.
+
+==== Parameters
+
+* DDTW takes `MSITrans` and `DC_WIDTH`; computes `ar.len` automatically
+  (`ar_len_dc = 8'd6` for extended DC, `8'd3` for base DC,
+  `rv_iommu_ddtw.sv:19`).
+* PDTW is parameter-less except for the AXI typedefs.
+
+==== Notes
+
+The CDW split is the single biggest microarchitectural decision the author
+made on top of the ZDL design. It costs ~one AXI mux and one OR-gate per
+status signal, and it buys:
+
+* Two independent FSMs that can be re-verified in isolation.
+* A clean injection point for TASK2's *concurrent* DC + PC walks (only the
+  mux needs to grow into an arbiter).
+* Symmetry with the IOTLB-S1 / IOTLB-S2 split (every directory and every
+  cache is now per-stage).
+
+[VERIFY: a TODO at `pdtw.sv` v4.3 header comments "axi4_bc が BURST_INCR +
+len=0 を hang する説は誤り". Confirm that no `BURST_FIXED` workaround remains
+in PDTW under axi4_bc=1.]
+
+=== DDTC and PDTC
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+Cache the most recently used Device / Process Contexts to avoid repeated
+DDT/PDT walks for the same `(device_id)` or `(device_id, process_id)`.
+
+==== Interfaces
+
+DDTC keys on `lu_did_i` only. PDTC keys on `(lu_did_i, lu_pid_i)`. Both
+expose `lookup_i`, `lu_hit_o`, `lu_content_o`, update ports, and flush
+ports tied to the relevant `IODIR.INVAL_*` commands.
+
+==== Internal Structure
+
+Each is a fully-associative array of `{tag, valid}` plus a content array;
+linear comparator generates one-hot hits. Replacement is round-robin
+(`replace_en`). Flush logic handles the `dv` / `pv` qualifiers from the
+`IODIR.INVAL_*` commands.
+
+==== Parameters
+
+`DDTC_ENTRIES`, `PDTC_ENTRIES`, `DC_WIDTH` (passed through for DDTC).
+
+==== Notes
+
+WARNING: Same *single-entry placeholder* posture as the IOTLBs in this
+TASK1 integration. The interface is real; the depth is not.
+
+=== MSI PTW
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+When the IOVA matches an MSI pattern (DC.msi_addr_pattern / mask), translate
+the MSI write by fetching an MSI PTE rather than a normal page-table leaf.
+Two co-existing FSMs:
+
+* *MSI-FLAT* — basic translate, writes IOTLB-S2 with `is_msi = 1`.
+* *MSI-MRIF* — Memory-Resident Interrupt File path; updates MRIFC instead.
+
+==== Interfaces (selected)
+
+[cols="1,1,2", options="header"]
+|===
+| Port                | Dir | Meaning
+| `init_msi_trans_i`  | in  | Trigger MSI translation
+| `req_iova_i`, `en_1S_i`, `is_rx_i` | in | Request payload
+| `vpn_i`, `pscid_i`, `gscid_i`, `is_1S_2M_i`, `is_1S_1G_i`, `gpte_i` | in | S1 data from PTW (when S1 is enabled)
+| `msiptp_ppn_i`, `msi_addr_mask_i` | in | DC.msiptp fields
+| `iotlb_update_o`, `iotlb_msi_content_o` | out | Update IOTLB-S2 with synthetic entry
+| `mrifc_update_o`, `mrifc_msi_content_o` | out | Update MRIFC
+| `ignore_o`          | out | Drop the write silently (per spec, some MSI paths abort without fault)
+| `error_o`, `cause_o`| out | Faults (MSI_PTE_*)
+|===
+
+==== Internal Structure
+
+Two decoupled 4-state FSMs (`IDLE`, `MEM_ACCESS`, `*_PROC_PTE`, `*_ERROR`).
+MSI-FLAT reads 64 bits (the first beat) and ignores the second; if the PTE
+is MRIF-mode it triggers MSI-MRIF, which then validates the full 128-bit
+MSI PTE.
+
+==== Parameters
+
+`MSITrans` — `MSI_DISABLED` removes the entire block; `MSI_FLAT_ONLY` keeps
+only MSI-FLAT; `MSI_FLAT_MRIF` keeps both.
+
+==== Notes
+
+For TASK1 verification, MSI translation success cases do not yet pass — all
+current MSI vectors fault on S1 in the wrapper before reaching this block.
+See <<verification>>, gap §9.3.1.
+
+=== Register Map (CSR Bank)
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+Memory-mapped configuration register file. Generated by LowRISC `reggen`
+from the IOMMU register description. Exposes ~50 registers in a 4 KiB
+window (see <<csr-map>>).
+
+==== Interfaces
+
+* `reg_req_i`, `reg_rsp_o` — LowRISC RegBus to / from `rv_iommu_prog_if`.
+* `reg2hw`, `hw2reg` — struct buses to the rest of the IOMMU (CSRs decoded
+  field-by-field into `iommu_reg2hw_t` / `iommu_hw2reg_t`).
+* `devmode_i` — when 1, unmapped accesses return an explicit error rather
+  than silently OKAY.
+
+==== Internal Structure
+
+3550 lines of generated SystemVerilog (`rv_iommu_regmap.sv`). Each field is
+a `rv_iommu_field` instance with W1C / RW / RO behavior baked in. Address
+decoding is a flat case statement on `reg_addr`.
+
+==== Parameters
+
+`DATA_WIDTH = 32` fixed, plus the feature parameters (`MSITrans`, `IGS`,
+`N_INT_VEC`, `N_IOHPMCTR`, `InclPC`, `InclDBG`) which gate the existence
+of dependent fields (e.g., `ipsr.pmip`, `cqcsr.fence_w_ip`).
+
+==== Notes
+
+NOTE: The author has read the regmap to wire signals correctly; the regmap
+itself is generated and tracked as *Borrowed*.
+
+=== CQ Handler
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+Fetch commands from the in-memory Command Queue (CQ) at
+`cq_base_ppn || cq_head * 16`, decode them, and drive the corresponding
+flush / fence signals.
+
+==== Internal Structure
+
+[source]
+----
+IDLE → FETCH → REGISTER → DECODE → WRITE → IDLE     (success path)
+                       ↘ ERROR                       (illegal opcode / mem fault)
+----
+
+A sub-FSM `wr_state_q` (`AW_REQ`, `W_DATA`, `B_RESP`) handles AXI write of
+fences and progress markers. Supported opcodes (from `rv_iommu_pkg.sv:225`):
+
+* `IOTINVAL` (with `VMA` / `GVMA` sub-codes) — drives the IOTLB flush bus.
+* `IODIR` (with `DDT` / `PDT` sub-codes) — drives DDTC / PDTC flush bus.
+* `IOFENCE` — write-back marker; sets `fence_w_ip`.
+* `ATS` — recognized but its sub-commands fault as illegal (no ATS in scope).
+
+==== Notes
+
+The CQ handler enforces queue-pointer hazards before issuing flushes
+(unread commands behind the current head are not pre-fetched). Single
+in-flight command at a time.
+
+=== FQ Handler
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+When the translation logic raises `event_valid_i`, format a 32-byte fault
+record and write it to `fq_base + fq_tail * 32`. Update `fqcsr` overflow
+flags if the queue is full.
+
+==== Internal Structure
+
+* `IDLE → WRITE → IDLE` main FSM, plus `wr_state_q` sub-FSM for the AXI
+  AW/W/B sequence.
+* `is_full_o` (back-pressure to the top FSM): when high, translation faults
+  cannot make progress and `riscv_iommu.sv:880` keeps the top FSM in
+  READ/WRITE until the FQ drains.
+
+==== Notes
+
+`is_full` deadlock risk is documented in
+`doc/modules/riscv_iommu.md` §12.1 — software must drain the FQ to recover.
+This is spec-allowed behavior; the IOMMU intentionally does not drop fault
+records.
+
+=== Interrupt Generation: MSI IG / WSI IG
+
+*Ownership layer:* Borrowed.
+
+==== Purpose
+
+Convert internal interrupt-pending bits (`cip`, `fip`, `pmip`) into either
+write transactions on the data-structures interface (MSI mode) or level
+signals on `wsi_wires_o` (WSI mode).
+
+==== Internal Structure
+
+* WSI IG (`rv_iommu_wsi_ig.sv`, 55 lines): pure combinational. Indexes
+  `wsi_wires_o[intv_i[s]]` from `intp_i[s]` for `s = 0..N_INT_SRCS-1`.
+* MSI IG (`rv_iommu_msi_ig.sv`): 3-state FSM (`IDLE`, `WRITE`, `ERROR`)
+  plus `wr_state_q` for AW/W/B; one-hot vector arbiter across the 16 MSI
+  table entries; mask-aware (M=1 vectors are queued, not sent).
+
+==== Parameters
+
+`N_INT_VEC` (1, 2, 4, 8, 16) sizes `wsi_wires_o`. `IGS` selects
+`WSI_ONLY` / `MSI_ONLY` / `BOTH`.
+
+== Operation Flows
+
+=== Single-Stage Translation (S1 only)
+
+. Device asserts `ar_valid` / `aw_valid` on `dev_tr_req_i`. Top FSM transitions
+  `IDLE → READ` (or `WRITE`).
+. Translation wrapper looks up DDTC by `device_id`. On hit, `dc_base` is
+  available immediately; on miss, DDTW fetches it from DDT and updates DDTC.
+. If `dc.tc.pdtv = 1`, PDTC is consulted next, else `dc.fsc` is the S1 root.
+  PDTW fills PDTC on miss.
+. With S1 enabled (`pc.fsc.mode != 0` or `dc.fsc.mode != 0`) and S2 disabled
+  (`dc.iohgatp.mode == 0`), IOTLB-S1 is looked up. On hit, the leaf PTE is
+  combined with the page offset to form SPA.
+. On miss, PTW-Ctrl enters `WM_SINGLE_S1`, walks 3 levels of the S1 tree via
+  PTW-Walker, and on a valid leaf calls `update_iotlb_o` to fill IOTLB-S1.
+. SPA is produced; the top FSM transitions to its `resume_*` branch, which
+  steers `axi_demux` to the Completion IF and the device sees the translated
+  request go out.
+
+=== Single-Stage Translation (S2 only)
+
+Same as S1-only, with these differences:
+
+* The IOVA is interpreted as a GPA (`iova_s2_ncanon` checks
+  `|iova_i[63:41]`).
+* Only IOTLB-S2 is consulted on lookup.
+* PTW-Ctrl uses `WM_SINGLE_S2`, walking only the G-stage page tree from
+  `iohgatp_ppn`.
+
+=== Two-Stage Nested Translation
+
+. After DC (and optionally PC) lookup as above, both `S1_en` and `S2_en`
+  are 1.
+. The combined IOTLB hit (`iotlb_lu_hit = s1_hit & s2_hit`) requires both
+  S1 and S2 to be cached.
+. On miss, PTW-Ctrl enters `WM_NESTED`, alternating between `PH_S1` and
+  `PH_S2`: each S1 PTE PPN goes through a G-stage walk before being
+  consumed as an S2-translated S1 PT pointer.
+. The (S1 leaf, S2 leaf) pair updates IOTLB-S1 and IOTLB-S2 in lock-step
+  via the wrapper's combined update bus.
+
+=== Translation with Process Context (PDT walk)
+
+. DC is fetched; `dc.tc.pdtv = 1` and `dc.tc.dpe` decides whether `pid=0`
+  fallback applies.
+. PDTC is looked up by `(did, pid)`. On miss PDTW is started. If S2 is
+  enabled, PDTW non-leaves and the PC leaf pointer themselves need S2
+  translation, which triggers PTW-Ctrl in `WM_IMPLICIT_S2`.
+. PDT walk completes with `update_pc_o` to PDTC. The wrapper picks up
+  `pc.fsc` as the S1 root and continues as the S1-only or nested flow.
+
+=== MSI Write Translation
+
+. The IOVA matches DC.msi_addr_pattern / mask
+  (`iova_is_msi = 1` in the wrapper).
+. MSI PTW is started (`init_msi_trans_i`). It fetches the MSI PTE; in FLAT
+  mode it writes IOTLB-S2 with `is_msi = 1`. Subsequent lookups hit the
+  MSI entry directly.
+. SPA is computed from the MSI PTE PPN + offset and the write is forwarded
+  to the Completion IF.
+
+WARNING: MSI success path is not yet PASSing in the TASK1 verification
+campaign. See <<verification>>.
+
+=== IOATC Miss → Walk → Fill
+
+[source]
+----
+lookup_i = 1
+  │
+  ├─ hit  ──► commit, drive trans_valid_o, forward to comp_if
+  └─ miss ──► start walker (DDTW / PDTW / PTW / MSI PTW)
+               │
+               ├─ walker drives ds_req_o via ds_if arbiter
+               ├─ memory returns data via ds_resp_i
+               ├─ walker FSM commits in ST_PROC (PTW) or PH_LEAF_S* (CDW)
+               └─ walker asserts update_*_o → cache writes tag+content+valid
+                   then translation is re-attempted (lookup hits this cycle)
+----
+
+=== Fault Generation and Reporting to FQ
+
+. Translation logic (any block) sets `trans_error_o` with `cause_code_o`,
+  `bad_gpaddr_o`, `is_guest_pf_o`, `is_implicit_o`.
+. Wrapper qualifies with `report_fault_o = (ddtc_hit & !dtf) | report_always |
+  msi_write_error | (cdw_error & is_ddt_walk) | (ptw_error & is_ddt_walk)`
+  (`tw_sv39x4_pc.sv:358`).
+. SW IF wrapper raises `event_valid_i` to FQ handler with the full payload.
+. FQ handler formats the 32-byte FQ entry and writes it to memory.
+. If `fq_ie = 1`, the corresponding `ipsr.fip` bit asserts and triggers
+  WSI / MSI generation.
+. The top FSM observes `is_fq_fifo_full` to back-pressure new error
+  responses while FQ is full (prevents losing fault records).
+
+=== Command Queue Processing
+
+. SW writes a 16-byte command at `cq_base + cq_tail * 16` and increments
+  `cqt` (i.e. `cq_tail`).
+. CQ handler detects `cq_tail != cq_head`, enters `FETCH`, AR-reads the
+  16-byte command in two beats, `REGISTER`s it, `DECODE`s the opcode.
+. Side effects drive flush bus (for `IOTINVAL` / `IODIR`) or `fence_w_ip`
+  (for `IOFENCE` after the write completes).
+. `cq_head` is incremented; if there are more commands the FSM loops.
+
+== Fault Handling
+
+=== Detected Fault Types
+
+The full cause-code enumeration is in `packages/rv_iommu/rv_iommu_pkg.sv:314-345`.
+Codes relevant to TASK1's verified path:
+
+[cols="1,2,3", options="header"]
+|===
+| Code | Name                                | Trigger (in this IP)
+| 1    | `INSTR_ACCESS_FAULT`                 | I-fetch (`is_rx`) hits a PMA/PMP-disallowed region (reserved / placeholder).
+| 5    | `LD_ACCESS_FAULT`                    | Load-side access fault.
+| 7    | `ST_ACCESS_FAULT`                    | Store-side access fault.
+| 12   | `INSTR_PAGE_FAULT`                   | I-fetch S1 page fault.
+| 13   | `LOAD_PAGE_FAULT`                    | Load S1 page fault (V=0, U=0, A=0, perm, reserved, misaligned).
+| 15   | `STORE_PAGE_FAULT`                   | Store S1 page fault (V=0, W=0, D=0, perm, reserved, misaligned).
+| 20   | `INSTR_GUEST_PAGE_FAULT`             | I-fetch S2 page fault.
+| 21   | `LOAD_GUEST_PAGE_FAULT`              | Load S2 page fault.
+| 23   | `STORE_GUEST_PAGE_FAULT`             | Store S2 page fault.
+| 256  | `ALL_INB_TRANSACTIONS_DISALLOWED`    | IOMMU off (`ddtp.iommu_mode = Off`).
+| 257  | `DDT_ENTRY_LD_ACCESS_FAULT`          | AXI SLVERR while fetching DC.
+| 258  | `DDT_ENTRY_INVALID`                  | DC.tc.V = 0.
+| 259  | `DDT_ENTRY_MISCONFIGURED`            | DC self-consistency check fail.
+| 260  | `TRANS_TYPE_DISALLOWED`              | E.g. ATS request without `dc.tc.en_ats`.
+| 261-263 | `MSI_PTE_*`                       | MSI PTW faults.
+| 265-267 | `PDT_ENTRY_*`                     | PDTW faults.
+| 268-274 | Data-corruption / internal faults | Reserved for memory-side errors.
+|===
+
+=== Fault Precedence
+
+The translation wrapper resolves precedence in a single `always_comb` block.
+Highest priority first:
+
+. Pre-DDTC faults (`report_always` set): IOMMU off, ATS disallowed, illegal
+  translation type.
+. DDTC miss → DDTW errors (`cdw_error & is_ddt_walk`).
+. PDTC miss → PDTW errors.
+. PTW errors during normal walk (`ptw_error & !is_implicit`).
+. PTW errors during implicit walk (reported with `is_implicit_o = 1`).
+. MSI PTW errors.
+. Permission / U / reserved / misaligned checks at PTW leaf commit.
+
+`dc.tc.dtf = 1` (Disable Translation Faults) suppresses FQ reporting for
+post-DDTC faults — the translation still fails and SLVERR is returned, but
+no record reaches the queue.
+
+=== Fault Reporting Path
+
+[source]
+----
+PTW / CDW / MSIPTW raises cause/iotval/iotval2
+        │
+        ▼
+   tw_sv39x4_pc combines + qualifies with DTF
+        │
+        ▼
+   sw_if_wrapper.event_valid_i = 1
+        │
+        ▼
+   fq_handler  ──── ds_req_o (AW + W beats) ────► memory[fq_base + fq_tail*32]
+        │
+        ▼
+   fq_tail++  ;  if (fq_ie) ipsr.fip = 1
+        │
+        ▼
+   {wsi_ig, msi_ig} signal SW
+----
+
+== Configuration and Parameters
+
+=== Build-Time Parameters (Top Module)
+
+From `rtl/riscv_iommu.sv:19-78`.
+
+[cols="2,2,1,4", options="header"]
+|===
+| Parameter           | Type                  | Default              | Purpose
+
+| `IOTLB_ENTRIES`     | `int unsigned`         | `4` (1 in TASK1 build) | IOTLB depth (passed to both S1 / S2 caches in this implementation).
+| `DDTC_ENTRIES`      | `int unsigned`         | `4` (1)              | DDTC depth.
+| `PDTC_ENTRIES`      | `int unsigned`         | `4` (1)              | PDTC depth.
+| `MRIFC_ENTRIES`     | `int unsigned`         | `4`                  | MRIF cache depth. Unused unless `MSITrans = MSI_FLAT_MRIF`.
+| `InclPC`            | `bit`                  | `1`                  | Enable Process Context support.
+| `InclBC`            | `bit`                  | `0`                  | Enable AXI4 4 KiB boundary checker.
+| `InclDBG`           | `bit`                  | `0`                  | Enable debug-register translation path.
+| `MSITrans`          | `rv_iommu::msi_trans_t`| `MSI_DISABLED`        | `{MSI_DISABLED, MSI_FLAT_ONLY, MSI_FLAT_MRIF}`.
+| `IGS`               | `rv_iommu::igs_t`      | `WSI_ONLY`           | `{WSI_ONLY, MSI_ONLY, BOTH}`.
+| `N_INT_VEC`         | `int unsigned`         | `16`                 | Number of interrupt vectors (1, 2, 4, 8, 16).
+| `N_IOHPMCTR`        | `int unsigned`         | `0`                  | HPM counters (0..31). 0 disables HPM. TASK1 uses 0.
+| `ADDR_WIDTH`        | `int`                  | `-1`                 | AXI address width (set by integrator).
+| `DATA_WIDTH`        | `int`                  | `-1`                 | AXI data width.
+| `ID_WIDTH`          | `int`                  | `-1`                 | AXI master-side ID width.
+| `ID_SLV_WIDTH`      | `int`                  | `-1`                 | AXI slave-side ID width.
+| `USER_WIDTH`        | `int`                  | `1`                  | AXI user-bus width.
+| `aw_chan_t` … `reg_rsp_t` | `type`           | `logic`              | AXI / RegBus channel struct types.
+|===
+
+PTW-Ctrl exposes additional debug parameters (see <<block-iotlb>> sibling
+section on PTW): `ENABLE_PTE_RESERVED_CHECK`, `ENABLE_PTE_MISALIGN_CHECK`,
+`ENABLE_PTE_AD_CHECK`, `ENABLE_PTE_U_CHECK`, `ENABLE_PTE_PERM_CHECK` — all
+default to 1 in production.
+
+[VERIFY: confirm exact TASK1 build-time values for the IOATC depths and AI
+gating; defaults shown above are the RTL defaults from the top module.]
+
+=== Run-Time Configuration
+
+All run-time configuration is via the CSR bank (<<csr-map>>). The minimum
+boot sequence is:
+
+. Program `ddtp` with the DDT root pointer and `iommu_mode = 3LVL/2LVL/1LVL`.
+. Program `cqb` (CQ base), `cqcsr.cqen = 1`. Wait for `cqcsr.cqon = 1`.
+. Program `fqb`, `fqcsr.fqen = 1`. Wait for `fqcsr.fqon = 1`.
+. Program `fctl` (endianness, WSI/MSI select).
+. (Optional) Program `icvec`, `msi_addr_*`, `msi_data_*`, `msi_vec_ctl_*` for
+  per-source MSI routing.
+. Translations may now flow through `dev_tr_req_i`.
+
+=== Address Map
+
+* IOMMU CSR window: 4 KiB-aligned base; offsets within `0x000`-`0x30F`
+  (highest entry is `IOMMU_MSI_VEC_CTL_OFFSET = 12'h30c`).
+* DDT, PDT, page tables, CQ, FQ, and MSI tables live in normal DRAM; their
+  base PPNs are programmed via the CSRs above.
+
+== Software Interface
+
+[[csr-map]]
+=== CSR Map
+
+Table extracted from `packages/rv_iommu/rv_iommu_reg_pkg.sv:484-519`. Offsets
+are within the 4 KiB IOMMU window. All multi-byte registers are
+little-endian. 64-bit registers are accessed as paired 32-bit `_L` (lower)
+and `_H` (upper) words.
+
+[cols="1,2,1,1,3", options="header"]
+|===
+| Offset            | Name                       | Width | Access | Purpose
+
+| `0x000`/`0x004`   | `capabilities`             | 64    | RO     | Implemented capability bits (Sv39, Sv39x4, MSI flat, ATS, ...).
+| `0x008`           | `fctl`                     | 32    | RW     | Feature control: WSI/MSI select, endian, GxL, ...
+| `0x010`/`0x014`   | `ddtp`                     | 64    | RW     | DDT root pointer + IOMMU mode.
+| `0x018`/`0x01c`   | `cqb`                      | 64    | RW     | Command-queue base PPN + size.
+| `0x020`           | `cqh`                      | 32    | RO     | CQ head index (IOMMU-driven).
+| `0x024`           | `cqt`                      | 32    | RW     | CQ tail index (SW-driven).
+| `0x028`/`0x02c`   | `fqb`                      | 64    | RW     | Fault-queue base PPN + size.
+| `0x030`           | `fqh`                      | 32    | RW     | FQ head index (SW-driven).
+| `0x034`           | `fqt`                      | 32    | RO     | FQ tail index (IOMMU-driven).
+| `0x048`           | `cqcsr`                    | 32    | RW/W1C | CQ enable / interrupt-enable / error bits (`cmd_ill`, `cmd_to`, `cq_mf`, ...).
+| `0x04c`           | `fqcsr`                    | 32    | RW/W1C | FQ enable / IE / `fq_mf`, `fq_of`.
+| `0x054`           | `ipsr`                     | 32    | W1C    | Interrupt-pending status (cip / fip / pmip).
+| `0x058`           | `iocntovf`                 | 32    | RO     | HPM counter overflow bits (active only if `N_IOHPMCTR > 0`).
+| `0x05c`           | `iocntinh`                 | 32    | RW     | HPM counter inhibit bits.
+| `0x060`/`0x064`   | `iohpmcycles`              | 64    | RW     | HPM cycle counter.
+| `0x068`/`0x06c`-`0x15c`/`0x160` | `iohpmctr[0..30]`  | 64    | RW   | HPM event counters.
+| `0x160`/`0x164`-`0x254`/`0x258` | `iohpmevt[0..30]`  | 64    | RW   | HPM event selectors.
+| `0x258`/`0x25c`   | `tr_req_iova`              | 64    | RW     | Debug-IF: IOVA for self-translation.
+| `0x260`/`0x264`   | `tr_req_ctl`               | 64    | RW     | Debug-IF control: go, PV, R/W/X.
+| `0x268`/`0x26c`   | `tr_response`              | 64    | RO     | Debug-IF response (fault / SPA).
+| `0x2f8`/`0x2fc`   | `icvec`                    | 64    | RW     | Interrupt-cause → vector mapping.
+| `0x300`/`0x304`   | `msi_addr_x[0..15]`        | 64    | RW     | MSI message address per vector.
+| `0x308`           | `msi_data_x[0..15]`        | 32    | RW     | MSI data per vector.
+| `0x30c`           | `msi_vec_ctl_x[0..15]`     | 32    | RW     | MSI per-vector mask.
+|===
+
+NOTE: The `_x[0..15]` MSI vector blocks repeat every 16 bytes starting at
+`0x300`. Only the first vector's offset is shown.
+
+=== Command Queue Format and Supported Commands
+
+Each CQ entry is 16 bytes. Opcode is in `cmd[6:0]`; sub-codes in
+`cmd[9:7]` and `cmd[12:10]` distinguish variants.
+
+[cols="1,1,2,3", options="header"]
+|===
+| Opcode | Name      | Sub-codes (in this IP)                | Effect
+
+| `0x1`  | `IOTINVAL`| `VMA`=0b000 / `GVMA`=0b001            | Asserts `flush_vma_o` / `flush_gvma_o` with optional `(av, gv, pscv, vpn, gscid, pscid)` qualifiers from the rest of the command.
+| `0x2`  | `IOFENCE` | —                                     | Writes the AV-supplied address with the AV-supplied DATA, then sets `cqcsr.fence_w_ip` when complete.
+| `0x3`  | `IODIR`   | `DDT`=0b000 / `PDT`=0b001             | Asserts `flush_ddtc_o` / `flush_pdtc_o` with optional `(dv, pv, did, pid)` qualifiers.
+| `0x4`  | `ATS`     | (not implemented)                     | Decodes to `cmd_ill`; FQ records the illegal command.
+|===
+
+=== Fault Queue Format
+
+Each FQ entry is 32 bytes. Field layout (see
+`doc/spec/riscv-iommu/07-chapter-4` for the canonical reference, mirrored by
+`fq_handler` write logic):
+
+[cols="1,1,3", options="header"]
+|===
+| Offset | Field        | Source
+| 0      | `cause`      | `cause_code_i` from translation logic
+| 4      | `pid` + `priv` + `pv` + `ttyp` | request metadata
+| 8      | `iotval`     | IOVA (or `iova_i`) that caused the fault
+| 16     | `iotval2`    | GPA bits[63:2] for guest page faults (S2)
+| 24     | `did`        | originating `device_id`
+|===
+
+The IOMMU stalls (`is_full_o = 1` back-pressures the top FSM) rather than
+overwriting if the queue is full.
+
+=== Programming Sequence
+
+A working software handshake to enable a single device:
+
+[source]
+----
+1. wr  ddtp     ← {iommu_mode = 3LVL, ppn = &DDT}
+2. wr  cqb      ← {ppn = &CQ, log2sz = 4}      // 16-entry CQ
+3. wr  fqb      ← {ppn = &FQ, log2sz = 4}      // 16-entry FQ
+4. wr  cqcsr.cqen = 1 ; spin until cqcsr.cqon == 1
+5. wr  fqcsr.fqen = 1 ; spin until fqcsr.fqon == 1
+6. wr  fctl     ← {wsi = 1, be = 0}
+7. (optional) populate icvec / msi_addr_* / msi_data_*
+8. Build DC entry in DDT[device_id]
+9. issue IODIR.INVAL_DDT(device_id) via CQ
+10. wait IOFENCE.AV completion
+11. Now translation traffic from device_id is honored.
+----
+
+[[verification]]
+== Verification
+
+=== Testbench Architecture
+
+[source]
+----
+         ┌────────── libiommu (ved-rivos C model) ──────────┐
+         │  gen_<category>.c × 19         (gen_vectors/)    │
+         │  → golden_<category>.jsonl                       │
+         └──────────────────┬───────────────────────────────┘
+                            │ replay-driven
+                            ▼
+   ┌──────── cocotb 2.0 / Verilator 5.046 ──────────┐
+   │  tb_riscv_iommu_wrapper.sv  (flat-AXI shim)    │
+   │       ↕                                          │
+   │  helpers/  (PhysicalMemoryManager, regs, faults)│
+   │  scenarios/test_replay_golden.py                │
+   │       │                                          │
+   │       ▼                                          │
+   │  DUT: riscv_iommu (full top, all 4 AXI ports)   │
+   │       │                                          │
+   │       ▼                                          │
+   │  rtl_log.jsonl  ── diff_logs.py ── golden_*.jsonl
+   └─────────────────────────────────────────────────┘
+----
+
+Key components:
+
+* `tb_coco/test/tb_riscv_iommu_wrapper.sv` — flat-port wrapper around the
+  IOMMU top so cocotb can drive AXI signals individually.
+* `tb_coco/test/helpers/` — Python helpers: `IommuEnv` (DUT facade),
+  `memory.py` (`PhysicalMemoryManager`, PTE installers), `replay.py`
+  (golden-driven test driver), `regs.py` (CSR programming), `faultq.py`
+  (FQ inspection), `cmdq.py` (CQ programming).
+* `tb_coco/test/reference/gen_vectors/` — 19 C files, each enumerating one
+  verification axis (S1 leaf flags, IOVA boundaries, S2 leaf flags,
+  nested permutations, PC variants, reserved bits, access matrices,
+  bare-mixed, MSI). Each emits `golden_<category>.jsonl`.
+* `scripts/diff_logs.py` — semantic JSON diff with shifted-match tolerance
+  for libiommu vs. RTL ordering differences.
+
+=== Coverage by Category
+
+The Makefile (`tb_coco/test/Makefile:128-138`) defines three tiers; the
+quick tier is the commit gate and the full tier is for nightly CI.
+
+[cols="2,1,1,3", options="header"]
+|===
+| Category              | Quick cases | In full only | Axis exercised
+
+| `phase1_pte_flags`     | 1,123      | —            | S1 leaf PTE flags 256 × level × access × reserved
+| `iova_variation`       | 1,024      | —            | IOVA VPN[2/1/0] × 8 boundaries × 2 access
+| `s2_only`              | 1,123      | —            | S2 leaf PTE flags (mirrors `phase1` on G-stage)
+| `nested`               | 1,123      | —            | S1 leaf flags × nested context with identity S2
+| `nested_full`          | —          | 131,072      | S1 leaf × S2 leaf full Cartesian × access
+| `nested_full_quick`    | 512        | —            | Sampled `nested_full`
+| `pc_phase1_pte_flags`  | 1,123      | —            | PC variant of `phase1_pte_flags`
+| `pc_iova_variation`    | 1,024      | —            | PC variant of `iova_variation`
+| `pc_s2_only`           | 1,123      | —            | PC variant of `s2_only`
+| `pc_nested`            | 1,123      | —            | PC variant of `nested`
+| `pc_nested_full`       | —          | 131,072      | PC variant of `nested_full`
+| `pc_nested_full_quick` | 512        | —            | Sampled `pc_nested_full`
+| `pte_reserved_s1`      | 132        | —            | Reserved-bit faults on S1 leaf (bits 54..62)
+| `pte_reserved_s2`      | 132        | —            | Reserved-bit faults on S2 leaf
+| `pte_reserved_nested`  | 87         | —            | Reserved-bit faults across nested
+| `access_matrix_s1`     | 32         | —            | R/W/X × U/SUM combinations on S1
+| `access_matrix_s2`     | 32         | —            | Same on S2
+| `access_matrix_nested` | 80         | —            | Same on nested
+| `bare_mixed`           | 16         | —            | Bare-S1, Bare-S2, Bare-Bare permutations
+| `msi_translation`      | 61         | —            | MSI flat-translate
+| *Quick tier total*     | *10,382*  | —            |
+| *Full tier total*      | *10,382*  | *+ 262,144*  | (~272k cases)
+|===
+
+Result snapshot (latest quick tier run, per
+`presen_outline.md` slide 9):
+
+* *PASS*: ~10,360 of 10,382 cases.
+* *FAIL*: ~20 cases, all confined to `s2_only` `iotval2` formatting (the
+  cause / iotval / ttyp fields all match libiommu; only the `iotval2` GPA
+  byte ordering for guest page faults differs).
+* *No timeouts* (`PPN = "0xNORESP"` count is zero in the last run).
+
+=== Known Verification Gaps
+
+WARNING: Five named gaps remain in the TASK1 verification campaign.
+
+. *MSI basic-translate success path* — all 61 cases in
+  `golden_msi_translation.jsonl` currently fault on S1 inside the wrapper
+  before reaching MSI PTW. Severity: medium (MSI is a TASK1 in-scope
+  feature but ride-along, not the verification focus). Remediation: ~1
+  week — populate S1 mapping for the MSI IOVA, then re-run.
+. *Exec access type (`ACC_EXEC`)* — `access_matrix_*` collapses R/W; exec is
+  exercised only via `is_rx_i` qualifiers on read flow. No independent
+  X-permission axis. Severity: low. Remediation: ~0.5 day — add `ACC_EXEC`
+  loop to `gen_access_matrix_*.c`.
+. *DID variation* — all golden vectors use `DID = 0` (`GOLDEN_DID` in
+  `replay.py`). Multi-device DDT lookups, IODIR scoping, and DDTC hit/miss
+  with multiple devices are not directly verified. Severity: medium for
+  CDW; the underlying logic is generic but DID-encoded boundary cases are
+  not exercised. Remediation: ~1 day — add `gen_did_variation.c`.
+. *Page offset variation* — `DEFAULT_PAGE_OFFSET = 0x345` is fixed across
+  all vectors. The 12-bit offset path is purely combinational so the risk
+  is low, but full coverage requires varying the offset. Severity: low.
+  Remediation: ~0.5 day.
+. *Misaligned-access fault* — `ar.size` is always 8 byte (3'b011) in the
+  TB; the misalignment fault path is unreached. Severity: low.
+  Remediation: ~0.5 day to add a small generator.
+
+=== Verification Deferred to TASK2
+
+* Multi-entry IOATC behavior (hit ordering, replacement, victim-buffer
+  thrash). Trivially out of scope while caches are single-entry placeholders.
+* Out-of-order multi-walk scheduling — depends on TASK2 PTW scheduler.
+* PCIe ATS commands.
+* HPM event counters (require `N_IOHPMCTR > 0`).
+* Debug IF (`tr_req_ctl.go` flow).
+* Power / area / formal verification.
+
+== Known Limitations and Open Items
+
+=== Single-Entry IOATCs
+
+The current build configures `IOTLB_S1_ENTRIES = IOTLB_S2_ENTRIES =
+DDTC_ENTRIES = PDTC_ENTRIES = 1`. This is intentional: the *interface* of
+each cache (lookup, update, flush) is fully implemented and verified, but
+the *storage* is a single fully-associative entry. The replacement policy,
+the choice of associativity, and the eviction-vs.-flush race semantics are
+all decisions explicitly deferred to TASK2.
+
+The IOATCs are also under-verified relative to a production design:
+multi-entry behavior is by construction untested in TASK1.
+
+=== Out-of-Scope Features
+
+[cols="1,2", options="header"]
+|===
+| Feature              | Disposition
+
+| MRIF / MRIFC          | RTL is in the tree (from ZDL) but disabled via
+                          `MSITrans = MSI_DISABLED`. Untouched and untested by the author.
+| Super-page support    | `_2M` / `_1G` flags propagate through PTW commit and
+                          IOTLB tag storage, but the verification campaign uses
+                          4 KiB leaves exclusively. Behaviour at 2 MiB / 1 GiB
+                          is `推測` not `verified`.
+| HPM                    | `N_IOHPMCTR = 0`. Block exists; counters and
+                          event-select wiring are dormant.
+| Debug interface        | `InclDBG = 0`. Block exists; not exercised.
+| AXI boundary check     | `InclBC = 0`. Block exists; not exercised.
+| PCIe ATS commands      | Decoded as `cmd_ill` by the CQ handler.
+| HW A/D update          | Not supported. PTW faults on A=0/D=0 instead.
+| `t2gpa = 1`            | Wiring exists in DC.tc but the IOMMU does not return
+                          GPA in completion; not validated.
+|===
+
+=== Open Items / VERIFY List
+
+. *§4 — PTW-Walker BURST_FIXED vs. DDTW/PDTW BURST_INCR.* Reasonable
+  interpretation: PTW reads single 8-byte PTEs so `BURST_FIXED, len=0` is
+  the simpler choice; DDTW/PDTW read multi-beat DC/PC so `BURST_INCR`. The
+  PDTW v4.3 header explicitly reverts a "FIXED" attempt for DC/PC reads.
+  *Action:* confirm against integration partner expectations.
+. *§4.2 — IOTLB depth at integration time.* Top-level RTL defaults are 4
+  but the prompt prescribes 1 for TASK1 deliverables. *Action:* lock the
+  build-system override (or `lint_checks.sv` analog) that pins depths to 1
+  in the TASK1 build, and reflect that here.
+. *§4.6 — Regmap reset values for capability-dependent fields.* The
+  `RESVAL` macro on `ipsr.pmip` depends on `IGS`; full enumeration not
+  inlined here. *Action:* if a complete-RESVAL table is needed, generate
+  it from `rv_iommu_regmap.sv` parse rather than transcribe.
+. *§5 — Implicit S2 walk snapshot timing.* `walk_ctrl.sv` v4.5 header notes
+  that `impl_gppn_q` "is 0 at the snapshot tick" in `WM_IMPLICIT_S2` and
+  was replaced by `s2_target_gppn_q`. *Action:* note in any future tester
+  that DDTW must hold `cdw_pdt_gppn_i` valid until PTW's `snapshot_en`
+  rises.
+. *§7 — Process Context default*: `InclPC` defaults to `1` in
+  `riscv_iommu.sv` but to `0` in `rv_iommu_regmap.sv` and to `0` in the
+  PR README's parameter table. *Action:* declare PC support as
+  "implemented and on by default in this integration".
+. *§8 — t2gpa not exercised.* Wrapper does not yet drive ATS completions
+  that return GPA; flagged as out of scope in §10.2. *Action:* keep
+  deferred for TASK2.
+
+[appendix]
+== Glossary
+
+See <<terminology,§1.4 Terminology and Acronyms>>.
+The glossary above is canonical; this appendix exists to anchor cross-references
+from external documents.
+
+[appendix]
+== References
+
+* RISC-V IOMMU Architecture Specification, v1.0,
+  `https://github.com/riscv-non-isa/riscv-iommu`.
+* RISC-V Privileged Architecture Specification, v1.13.
+* AMBA AXI Protocol Specification IHI 0022 (issue L), ARM Limited.
+* Zero Day Labs RISC-V IOMMU IP — upstream of this fork
+  (Apache-2.0 WITH SHL-2.1).
+* `ved-rivos/iommu-reference` (`libiommu`) — golden reference model used
+  for `gen_*.c` vector generation.
+* Internal documents:
++
+[cols="2,4"]
+|===
+| `CLAUDE.md`                     | Project working rules and doc index.
+| `doc/modules/riscv_iommu.md`     | Top-module 1-pager (FSM, BR-IDs).
+| `doc/modules/translation_logic/wrapper/rv_iommu_tw_sv39x4_pc.md` | Translation wrapper card.
+| `doc/design-log.md`              | Per-decision log.
+| `doc/spec/riscv-iommu/**`        | Per-chapter markdown of the IOMMU spec.
+| `doc/spec/riscv-privileged/**`   | Per-chapter markdown of the Privileged ISA spec.
+| `doc/spec/IHI0022L_amba_axi_protocol_spec/**` | Per-chapter markdown of AXI spec.
+| `presen_outline.md`              | Presentation skeleton.
+| `tb_coco/test/reference/gen_vectors/README.md` | Vector-generator README.
+|===
+
+[appendix]
+== Revision History
+
+[cols="1,1,4", options="header"]
+|===
+| Date       | Revision | Changes
+| 2026-05-18 | 0.1      | Initial draft. Sections 1–10 populated from RTL
+                          (`rtl/**/*.sv`) and verification harness
+                          (`tb_coco/test/**`) snapshots taken on this date.
+                          Open items collected in §10.3.
+|===
