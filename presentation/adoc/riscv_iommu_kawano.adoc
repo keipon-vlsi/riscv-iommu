@@ -431,10 +431,14 @@ port (`rsp_valid_o`, `rsp_data_o`, `rsp_error_o`, `rsp_ready_i`).
 
 PTW-Walker FSM (3 states, `rv_iommu_pt_walker.sv:45-50`):
 
-[source]
-----
-ST_IDLE ──req_valid_i──► ST_ISSUE_AR ──ar_ready──► ST_WAIT_R ──r_valid & rsp_ready──► ST_IDLE
-----
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> ST_IDLE
+    ST_IDLE --> ST_ISSUE_AR : req_valid_i
+    ST_ISSUE_AR --> ST_WAIT_R : ar_ready
+    ST_WAIT_R --> ST_IDLE : r_valid && rsp_ready
+....
 
 * AXI defaults: `ar.id = 0x0`, `ar.size = 3'b011` (8 byte), `ar.len = 0`,
   `ar.burst = BURST_FIXED` (`pt_walker.sv:88-92`). A one-line comment in the
@@ -446,15 +450,18 @@ ST_IDLE ──req_valid_i──► ST_ISSUE_AR ──ar_ready──► ST_WAIT_R
 
 PTW-Ctrl FSM (5 states, `rv_iommu_walk_ctrl.sv:115-121`):
 
-[source]
-----
-ST_IDLE  ── init_rising_edge ──► ST_ISSUE
-ST_ISSUE ── walker_req_ready ──► ST_WAIT
-ST_WAIT  ── walker_rsp_valid ──► ST_PROC
-ST_PROC  ── (commit | advance) ─► ST_IDLE | ST_ISSUE
-ST_PROC  ── (fault detected) ───► ST_ERROR
-ST_ERROR ──────────────────────► ST_IDLE
-----
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> ST_IDLE
+    ST_IDLE --> ST_ISSUE : init_rising_edge
+    ST_ISSUE --> ST_WAIT : walker_req_ready
+    ST_WAIT --> ST_PROC : walker_rsp_valid
+    ST_PROC --> ST_ISSUE : advance (next level)
+    ST_PROC --> ST_IDLE : commit (leaf valid)
+    ST_PROC --> ST_ERROR : fault detected
+    ST_ERROR --> ST_IDLE
+....
 
 Two orthogonal axes superimpose on the 5 states:
 
@@ -613,15 +620,18 @@ request, and write them into DDTC / PDTC.
 
 Both walkers share the same 5-state FSM (added the *PROC* state in v4):
 
-[source]
-----
-ST_IDLE ── init_rising_edge ──► ST_ISSUE
-ST_ISSUE ── ar_ready ──────────► ST_WAIT
-ST_WAIT  ── r_valid & rlast ──► ST_PROC
-ST_PROC  ── advance | commit ─► ST_ISSUE | ST_IDLE
-ST_PROC  ── fault detected ───► ST_ERROR
-ST_ERROR ──────────────────── ► ST_IDLE
-----
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> ST_IDLE
+    ST_IDLE --> ST_ISSUE : init_rising_edge
+    ST_ISSUE --> ST_WAIT : ar_ready
+    ST_WAIT --> ST_PROC : r_valid && rlast
+    ST_PROC --> ST_ISSUE : advance (next level)
+    ST_PROC --> ST_IDLE : commit (leaf valid)
+    ST_PROC --> ST_ERROR : fault detected
+    ST_ERROR --> ST_IDLE
+....
 
 Phase encoding differs:
 
@@ -725,6 +735,18 @@ MSI-FLAT reads 64 bits (the first beat) and ignores the second; if the PTE
 is MRIF-mode it triggers MSI-MRIF, which then validates the full 128-bit
 MSI PTE.
 
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> MEM_ACCESS : init_msi_trans_i
+    MEM_ACCESS --> FLAT_PROC_PTE : r_valid (beat0)
+    FLAT_PROC_PTE --> IDLE : FLAT commit (update IOTLB-S2 is_msi=1)
+    FLAT_PROC_PTE --> IDLE : MRIF mode -> hand off to MRIF FSM
+    FLAT_PROC_PTE --> FLAT_ERROR : MSI_PTE_INVALID / MISCONFIGURED
+    FLAT_ERROR --> IDLE
+....
+
 ==== Parameters
 
 `MSITrans` — `MSI_DISABLED` removes the entire block; `MSI_FLAT_ONLY` keeps
@@ -783,11 +805,18 @@ flush / fence signals.
 
 ==== Internal Structure
 
-[source]
-----
-IDLE → FETCH → REGISTER → DECODE → WRITE → IDLE     (success path)
-                       ↘ ERROR                       (illegal opcode / mem fault)
-----
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> FETCH : cq_tail != cq_head
+    FETCH --> REGISTER : r_valid && rlast
+    REGISTER --> DECODE
+    DECODE --> WRITE : opcode valid
+    DECODE --> ERROR : illegal opcode
+    WRITE --> IDLE : b_valid
+    ERROR --> IDLE
+....
 
 A sub-FSM `wr_state_q` (`AW_REQ`, `W_DATA`, `B_RESP`) handles AXI write of
 fences and progress markers. Supported opcodes (from `rv_iommu_pkg.sv:225`):
@@ -820,6 +849,16 @@ flags if the queue is full.
 * `is_full_o` (back-pressure to the top FSM): when high, translation faults
   cannot make progress and `riscv_iommu.sv:880` keeps the top FSM in
   READ/WRITE until the FQ drains.
+
+[mermaid]
+....
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> WRITE : event_valid_i && !is_full
+    WRITE --> IDLE : b_valid (record committed)
+    WRITE --> ERROR : AXI SLVERR / overflow
+    ERROR --> IDLE
+....
 
 ==== Notes
 
@@ -870,6 +909,26 @@ signals on `wsi_wires_o` (WSI mode).
   steers `axi_demux` to the Completion IF and the device sees the translated
   request go out.
 
+[mermaid]
+....
+flowchart TD
+    A[Device asserts ar_valid/aw_valid] --> B[Top FSM: IDLE -> READ/WRITE]
+    B --> C{DDTC hit?}
+    C -- hit --> E[Use dc_base]
+    C -- miss --> D[DDTW fetch DC from DDT] --> E
+    E --> F{dc.tc.pdtv = 1 ?}
+    F -- no --> H[S1 root = dc.fsc.ppn]
+    F -- yes --> G{PDTC hit?}
+    G -- hit --> H2[S1 root = pc.fsc.ppn]
+    G -- miss --> G2[PDTW fetch PC from PDT] --> H2
+    H --> I{IOTLB-S1 hit?}
+    H2 --> I
+    I -- hit --> J[SPA = leaf PTE PPN + offset]
+    I -- miss --> K[PTW-Ctrl: WM_SINGLE_S1, walk 3 levels]
+    K --> L[update_iotlb_o fills IOTLB-S1] --> J
+    J --> M[axi_demux -> Completion IF]
+....
+
 === Single-Stage Translation (S2 only)
 
 Same as S1-only, with these differences:
@@ -879,6 +938,19 @@ Same as S1-only, with these differences:
 * Only IOTLB-S2 is consulted on lookup.
 * PTW-Ctrl uses `WM_SINGLE_S2`, walking only the G-stage page tree from
   `iohgatp_ppn`.
+
+[mermaid]
+....
+flowchart TD
+    A[Top FSM enters READ/WRITE] --> B[DDTC lookup as in S1-only]
+    B --> C{"iova[63:41] = 0 ?"}
+    C -- nonzero --> X[Fault: address malformed]
+    C -- zero --> D{IOTLB-S2 hit?}
+    D -- hit --> F[SPA = S2 leaf PPN + offset]
+    D -- miss --> E[PTW-Ctrl: WM_SINGLE_S2, walk G-stage from iohgatp]
+    E --> G[update_iotlb_o fills IOTLB-S2] --> F
+    F --> H[axi_demux -> Completion IF]
+....
 
 === Two-Stage Nested Translation
 
@@ -892,6 +964,22 @@ Same as S1-only, with these differences:
 . The (S1 leaf, S2 leaf) pair updates IOTLB-S1 and IOTLB-S2 in lock-step
   via the wrapper's combined update bus.
 
+[mermaid]
+....
+flowchart TD
+    A[DC and optional PC fetched] --> B{S1_en && S2_en ?}
+    B --> C{S1_hit && S2_hit ?}
+    C -- both hit --> J[Combined hit -> SPA via S1 leaf + S2 leaf]
+    C -- either miss --> D[PTW-Ctrl: WM_NESTED, start PH_S1]
+    D --> E[Issue S1 PTE read]
+    E --> F[Each S1 PTE PPN: switch to PH_S2]
+    F --> G[Walk G-stage on that PPN]
+    G --> H{S1 leaf reached ?}
+    H -- no --> E
+    H -- yes --> I[Lock-step fill IOTLB-S1 and IOTLB-S2] --> J
+    J --> K[axi_demux -> Completion IF]
+....
+
 === Translation with Process Context (PDT walk)
 
 . DC is fetched; `dc.tc.pdtv = 1` and `dc.tc.dpe` decides whether `pid=0`
@@ -901,6 +989,25 @@ Same as S1-only, with these differences:
   translation, which triggers PTW-Ctrl in `WM_IMPLICIT_S2`.
 . PDT walk completes with `update_pc_o` to PDTC. The wrapper picks up
   `pc.fsc` as the S1 root and continues as the S1-only or nested flow.
+
+[mermaid]
+....
+flowchart TD
+    A[DC fetched: dc.tc.pdtv = 1] --> B{"!pv_i && dc.tc.dpe ?"}
+    B -- yes --> B1[process_id = 0 fallback]
+    B -- no --> B2[process_id = pid_i]
+    B1 --> C{PDTC hit on did + pid ?}
+    B2 --> C
+    C -- hit --> J[S1 root = pc.fsc.ppn]
+    C -- miss --> D[PDTW start]
+    D --> E{S2_en ?}
+    E -- no --> H[Native PDT walk]
+    E -- yes --> F[cdw_implicit_access -> PTW WM_IMPLICIT_S2]
+    F --> G[G-stage translate each PDT level + PC pointer]
+    G --> H
+    H --> I[update_pc_o fills PDTC] --> J
+    J --> K[Continue as S1-only or nested]
+....
 
 === MSI Write Translation
 
@@ -912,24 +1019,40 @@ Same as S1-only, with these differences:
 . SPA is computed from the MSI PTE PPN + offset and the write is forwarded
   to the Completion IF.
 
+[mermaid]
+....
+flowchart TD
+    A[Write request with IOVA] --> B{IOVA matches msi_addr_pattern && mask ?}
+    B -- no --> Z[Normal translation flow]
+    B -- yes --> C[iova_is_msi = 1]
+    C --> D[MSI PTW: init_msi_trans_i]
+    D --> E[Fetch MSI PTE from msiptp]
+    E --> F{Mode}
+    F -- FLAT --> G[Write IOTLB-S2 with is_msi = 1]
+    F -- MRIF --> H[MRIF FSM, update MRIFC]
+    F -- invalid --> X[Fault: MSI_PTE_INVALID]
+    G --> I[Subsequent lookup hits MSI entry]
+    I --> J[SPA = MSI PTE PPN + offset -> Completion IF]
+....
+
 WARNING: MSI success path is not yet PASSing in the TASK1 verification
 campaign. See <<verification>>.
 
 === IOATC Miss → Walk → Fill
 
-[source]
-----
-lookup_i = 1
-  │
-  ├─ hit  ──► commit, drive trans_valid_o, forward to comp_if
-  └─ miss ──► start walker (DDTW / PDTW / PTW / MSI PTW)
-               │
-               ├─ walker drives ds_req_o via ds_if arbiter
-               ├─ memory returns data via ds_resp_i
-               ├─ walker FSM commits in ST_PROC (PTW) or PH_LEAF_S* (CDW)
-               └─ walker asserts update_*_o → cache writes tag+content+valid
-                   then translation is re-attempted (lookup hits this cycle)
-----
+[mermaid]
+....
+flowchart TD
+    A[lookup_i = 1] --> B{hit ?}
+    B -- hit --> C[commit + trans_valid_o -> Completion IF]
+    B -- miss --> D[Start walker: DDTW / PDTW / PTW / MSI PTW]
+    D --> E[Walker drives ds_req_o via ds_if arbiter]
+    E --> F[Memory returns data via ds_resp_i]
+    F --> G[Walker commits in ST_PROC PTW or PH_LEAF_S* CDW]
+    G --> H[Walker asserts update_*_o: tag + content + valid written]
+    H --> I[Re-attempt lookup -> hits this cycle]
+    I --> C
+....
 
 === Fault Generation and Reporting to FQ
 
@@ -954,6 +1077,26 @@ lookup_i = 1
 . Side effects drive flush bus (for `IOTINVAL` / `IODIR`) or `fence_w_ip`
   (for `IOFENCE` after the write completes).
 . `cq_head` is incremented; if there are more commands the FSM loops.
+
+[mermaid]
+....
+flowchart TD
+    A[SW writes 16B command, cqt++] --> B[CQ handler: cqt != cqh ?]
+    B -- no --> A
+    B -- yes --> C[FETCH: AR-read 16B in 2 beats]
+    C --> D[REGISTER]
+    D --> E[DECODE opcode]
+    E --> F{Opcode}
+    F -- IOTINVAL --> G[flush_vma_o / flush_gvma_o + AV/GV/PSCV qualifiers]
+    F -- IODIR --> H[flush_ddtc_o / flush_pdtc_o + DV/PV/DID/PID qualifiers]
+    F -- IOFENCE --> I[AXI write + set cqcsr.fence_w_ip]
+    F -- ATS --> J[cmd_ill -> FQ entry]
+    G --> K[cqh++]
+    H --> K
+    I --> K
+    J --> K
+    K --> B
+....
 
 == Fault Handling
 
@@ -1004,25 +1147,19 @@ no record reaches the queue.
 
 === Fault Reporting Path
 
-[source]
-----
-PTW / CDW / MSIPTW raises cause/iotval/iotval2
-        │
-        ▼
-   tw_sv39x4_pc combines + qualifies with DTF
-        │
-        ▼
-   sw_if_wrapper.event_valid_i = 1
-        │
-        ▼
-   fq_handler  ──── ds_req_o (AW + W beats) ────► memory[fq_base + fq_tail*32]
-        │
-        ▼
-   fq_tail++  ;  if (fq_ie) ipsr.fip = 1
-        │
-        ▼
-   {wsi_ig, msi_ig} signal SW
-----
+[mermaid]
+....
+flowchart TD
+    A[PTW / CDW / MSIPTW raises cause + iotval + iotval2] --> B[tw_sv39x4_pc combines + qualifies with DTF]
+    B --> C[sw_if_wrapper.event_valid_i = 1]
+    C --> D[fq_handler: AW + W beats on ds_req_o]
+    D --> E[Memory write at fq_base + fq_tail * 32]
+    E --> F[fq_tail++]
+    F --> G{fq_ie = 1 ?}
+    G -- yes --> H[ipsr.fip = 1]
+    G -- no --> I[Wait for SW polling]
+    H --> J[wsi_ig / msi_ig signal SW]
+....
 
 == Configuration and Parameters
 
